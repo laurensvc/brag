@@ -8,7 +8,7 @@ Type **/brag** to open the settings: turn each event on or off, paste your Disco
 
 The companion also gives you a page in your browser to change settings, browse past screenshots and see your Brag history, without starting WoW.
 
-**Posting to Discord needs a small companion script.** WoW addons can't access the internet, so the addon only takes the screenshot. The companion script runs on your PC, watches your Screenshots folder and uploads each new screenshot to a Discord webhook within a few seconds. Setup steps are in the project's README.
+**Posting to Discord needs a small companion script.** WoW addons can't access the internet, so the addon only takes the screenshot. The companion script runs on your PC, watches your Screenshots folder and uploads each new screenshot to a Discord webhook within a few seconds, with a caption saying who did what and where ("Thrall reached level 42!"). It retries if Discord hiccups and shrinks big screenshots to 1080p by default. Setup steps are in the project's README.
 
 Notes:
 - Screenshots you take yourself (Print Screen) are posted too while the companion runs.

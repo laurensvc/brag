@@ -12,11 +12,94 @@ for _, fmt in ipairs({ LOOT_ITEM_SELF, LOOT_ITEM_PUSHED_SELF }) do
   table.insert(lootPrefixes, (fmt:match("^(.-)%%s")))
 end
 
-local function brag(text)
+-- Data strip: WoW only writes files at logout, so the event details travel inside the screenshot.
+-- Black/white blocks in the top-left corner; the companion decodes them and crops them off.
+-- Layout (the companion's read_strip mirrors this): bits MSB first, row-major, BLOCK physical pixels each;
+-- bytes = "Bg", blocks per row (2 bytes), payload length, payload, Fletcher-16 checksum (2 bytes).
+local BLOCK = 8
+local strip = CreateFrame("Frame", nil, UIParent)
+strip:SetFrameStrata("TOOLTIP")
+strip:SetPoint("TOPLEFT")
+strip:Hide()
+local blocks = {}
+
+local function drawStrip(payload)
+  local w, h = 1024, 768 -- the companion also finds the block size itself, so a fallback is fine
+  if GetPhysicalScreenSize then w, h = GetPhysicalScreenSize() end
+  local size = BLOCK * 768 / h / strip:GetEffectiveScale() -- at scale 1, one UI unit = 768 / screen height pixels
+  local perRow = math.floor(w / BLOCK)
+  local bytes = { 66, 103, math.floor(perRow / 256), perRow % 256, #payload }
+  local s1, s2 = 0, 0
+  for i = 1, #payload do
+    local b = payload:byte(i)
+    bytes[#bytes + 1] = b
+    s1 = (s1 + b) % 255
+    s2 = (s2 + s1) % 255
+  end
+  bytes[#bytes + 1] = s1
+  bytes[#bytes + 1] = s2
+  local n = 0
+  for _, b in ipairs(bytes) do
+    for bit = 7, 0, -1 do
+      local on = math.floor(b / 2 ^ bit) % 2
+      local t = blocks[n + 1] or strip:CreateTexture(nil, "OVERLAY")
+      blocks[n + 1] = t
+      t:ClearAllPoints()
+      t:SetSize(size, size)
+      t:SetPoint("TOPLEFT", (n % perRow) * size, -math.floor(n / perRow) * size)
+      t:SetColorTexture(on, on, on, 1)
+      t:Show()
+      n = n + 1
+    end
+  end
+  for i = n + 1, #blocks do blocks[i]:Hide() end
+  strip:SetSize(perRow * size, math.ceil(n / perRow) * size)
+  strip:Show()
+end
+
+local function clean(s)
+  return (tostring(s or ""):gsub("[\t\r\n]", " "))
+end
+
+-- One screenshot at a time: a quest turn-in often levels you up too, and each needs its own strip.
+local queue, current = {}, nil
+local function nextShot()
+  current = tremove(queue, 1)
+  if not current then return strip:Hide() end
+  RaidNotice_AddMessage(RaidWarningFrame, current.text, ChatTypeInfo["RAID_WARNING"])
+  drawStrip(current.payload)
+  local shot = current
+  C_Timer.After(0.3, function() -- let the banner and strip render first
+    if current ~= shot then return end
+    shot.taken = true
+    Screenshot()
+    C_Timer.After(3, function() -- in case SCREENSHOT_SUCCEEDED never comes
+      if current == shot then nextShot() end
+    end)
+  end)
+end
+
+-- kind: level | quest | loot | test. detail: quest title or item name.
+local function brag(kind, text, detail, quality, level)
   tinsert(BragHistory, { time = time(), text = text }) -- the companion app shows this history
   if #BragHistory > 500 then tremove(BragHistory, 1) end -- keep the saved file small
-  RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo["RAID_WARNING"])
-  C_Timer.After(0.3, Screenshot) -- let the banner render first
+  local payload = table.concat({
+    "1", kind, clean(UnitName("player")), clean((UnitClass("player"))), level or UnitLevel("player"),
+    clean(GetRealZoneText()), clean(detail):sub(1, 120), quality or "",
+  }, "\t"):sub(1, 250) -- the length has to fit in one byte
+  tinsert(queue, { text = text, payload = payload })
+  if not current then nextShot() end
+end
+
+-- Quality from the link's color, so items that aren't cached yet still count.
+local function linkQuality(link)
+  local q = link:match("^|cnIQ(%d):")
+  if q then return tonumber(q) end
+  local color = link:match("^|c(%x%x%x%x%x%x%x%x)")
+  for quality, c in pairs(ITEM_QUALITY_COLORS) do
+    if color and c.hex and c.hex:lower() == "|c" .. color:lower() then return quality end
+  end
+  return select(3, GetItemInfo(link))
 end
 
 local questTitle
@@ -26,6 +109,8 @@ f:RegisterEvent("PLAYER_LEVEL_UP")
 f:RegisterEvent("QUEST_COMPLETE")
 f:RegisterEvent("QUEST_TURNED_IN")
 f:RegisterEvent("CHAT_MSG_LOOT")
+f:RegisterEvent("SCREENSHOT_SUCCEEDED")
+f:RegisterEvent("SCREENSHOT_FAILED")
 f:SetScript("OnEvent", function(_, event, arg1)
   if event == "ADDON_LOADED" and arg1 == ADDON then
     BragDB = BragDB or {}
@@ -34,22 +119,25 @@ f:SetScript("OnEvent", function(_, event, arg1)
       if BragDB[k] == nil then BragDB[k] = v end
     end
     db = BragDB
+  elseif event == "SCREENSHOT_SUCCEEDED" or event == "SCREENSHOT_FAILED" then
+    if current and current.taken then nextShot() end -- ignores screenshots the player takes
   elseif not (db and db.enabled) then
     return
   elseif event == "PLAYER_LEVEL_UP" and db.level then
-    brag("Level " .. arg1 .. "!")
+    brag("level", "Level " .. arg1 .. "!", nil, nil, arg1) -- UnitLevel still says the old level here
   elseif event == "QUEST_COMPLETE" then
     questTitle = GetTitleText() -- quest reward dialog is open; title is gone after turn-in
   elseif event == "QUEST_TURNED_IN" and db.quest then
-    brag("Quest complete: " .. (questTitle or "?"))
+    brag("quest", "Quest complete: " .. (questTitle or "?"), questTitle or "?")
     questTitle = nil
   elseif event == "CHAT_MSG_LOOT" and db.loot then
     for _, prefix in ipairs(lootPrefixes) do
       if arg1:find(prefix, 1, true) == 1 then
-        local item = arg1:match("|H(item:[^|]+)|h")
-        -- shortcut: uncached items return nil and are skipped; looted items are almost always cached
-        local _, link, quality = GetItemInfo(item or "")
-        if quality and quality >= db.minQuality then brag("Big drop: " .. link) end
+        local link = arg1:match("|c.-|Hitem:.-|h|r")
+        local quality = link and linkQuality(link)
+        if quality and quality >= db.minQuality then
+          brag("loot", "Big drop: " .. link, link:match("|h%[(.-)%]|h"), quality)
+        end
         return
       end
     end
@@ -60,7 +148,7 @@ end)
 local panel
 local function buildPanel()
   local p = CreateFrame("Frame", "BragPanel", UIParent, "BasicFrameTemplateWithInset")
-  p:SetSize(380, 290)
+  p:SetSize(380, 310)
   p:SetPoint("CENTER")
   p:SetMovable(true)
   p:EnableMouse(true)
@@ -120,7 +208,7 @@ local function buildPanel()
   e:SetText(db.webhook)
   e:SetCursorPosition(0)
   local hint = text(p, "GameFontDisableSmall",
-    "In Discord: Server Settings > Integrations > Webhooks > New Webhook > Copy URL, then paste here (Ctrl+V).\nThe companion sees changes after Save & reload.")
+    "In Discord: Server Settings > Integrations > Webhooks > New Webhook > Copy URL, then paste here (Ctrl+V).\nThe companion sees changes after Save & reload. Captions, retries and image size are on the companion page.")
   hint:SetPoint("TOPLEFT", 20, y - 68)
   hint:SetWidth(340)
   hint:SetJustifyH("LEFT")
@@ -137,7 +225,7 @@ local function buildPanel()
   test:SetText("Test post")
   test:SetScript("OnClick", function()
     p:Hide()
-    brag("Brag test: if this shows up in Discord, you're all set!")
+    brag("test", "Brag test: if this shows up in Discord, you're all set!")
   end)
   return p
 end

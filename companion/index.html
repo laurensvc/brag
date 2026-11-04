@@ -19,12 +19,12 @@
   input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--gold); }
   .field { display: block; margin-top: 12px; }
   .field span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-  select, input[type=url] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
+  select, input[type=url], input[type=number] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
   button { margin-top: 16px; background: var(--gold); color: #1a1408; border: 0; border-radius: 6px; padding: 9px 18px; font: inherit; font-weight: 600; cursor: pointer; }
   :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
   .hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
-  #msg { font-size: 14px; margin: 10px 0 0; }
-  #msg:empty { display: none; }
+  #msg, #cmsg { font-size: 14px; margin: 10px 0 0; }
+  #msg:empty, #cmsg:empty { display: none; }
   #shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
   .shot { display: block; color: inherit; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
   .shot:hover { border-color: var(--gold); }
@@ -69,6 +69,39 @@
       </form>
     </section>
     <section class="card">
+      <h2>Posting</h2>
+      <form id="companion">
+        <label class="row"><input type="checkbox" id="caption"> Add a caption (who, what, where)</label>
+        <label class="field"><span>Retries when Discord or the network fails</span>
+          <select id="retries">
+            <option value="0">Don't retry</option><option value="1">1</option>
+            <option value="2">2</option><option value="3">3</option>
+          </select>
+        </label>
+        <label class="field"><span>Max image size</span>
+          <select id="maxHeight">
+            <option value="720">720p</option><option value="1080">1080p</option>
+            <option value="1440">1440p</option><option value="2160">4K</option>
+            <option value="0">Original</option>
+          </select>
+        </label>
+        <label class="field"><span>JPEG quality</span>
+          <select id="jpegQuality">
+            <option value="95">Best (95)</option><option value="85">High (85)</option>
+            <option value="75">Medium (75)</option><option value="60">Small (60)</option>
+          </select>
+        </label>
+        <label class="field"><span>Keep post history for (days)</span>
+          <input type="number" id="keepDays" min="1" max="365" step="1">
+        </label>
+        <label class="row"><input type="checkbox" id="deleteShots"> Also delete older screenshots</label>
+        <p class="hint">Deletes every screenshot in your Screenshots folder older than that, including ones you took yourself. Can't be undone.</p>
+        <button type="submit">Save</button>
+        <p id="cmsg" role="status"></p>
+        <p class="hint">These apply right away, even while WoW is running.</p>
+      </form>
+    </section>
+    <section class="card">
       <h2>Activity</h2>
       <ul id="history"></ul>
     </section>
@@ -81,6 +114,9 @@
 <script>
   const $ = s => document.querySelector(s);
   const TOGGLES = ["enabled", "level", "quest", "loot"];
+  const COMPANION_TOGGLES = ["caption", "deleteShots"];
+  const COMPANION_NUMBERS = ["retries", "maxHeight", "jpegQuality", "keepDays"];
+  let deleteWasOn = false;
   const fmt = t => new Date(t * 1000).toLocaleString();
   let last = "";
 
@@ -101,7 +137,7 @@
       const card = el("a", { href: url, target: "_blank", rel: "noopener", className: "shot" });
       const body = el("div");
       const meta = el("p", { className: "meta" });
-      meta.append(el("span", {}, fmt(s.time)), el("span", { className: s.status.split(":")[0] }, s.status || "not posted"));
+      meta.append(el("span", {}, fmt(s.time)), el("span", { className: s.status.split(/[ :]/)[0] }, s.status));
       body.append(el("p", { className: "cap" }, s.caption || "Screenshot"), meta);
       card.append(el("img", { src: url, loading: "lazy", alt: s.caption || s.name }), body);
       shots.append(card);
@@ -123,6 +159,9 @@
       for (const k of TOGGLES) $("#" + k).checked = st.settings[k];
       $("#minQuality").value = st.settings.minQuality;
       $("#webhook").value = st.settings.webhook;
+      for (const k of COMPANION_TOGGLES) $("#" + k).checked = st.companion[k];
+      for (const k of COMPANION_NUMBERS) $("#" + k).value = st.companion[k];
+      deleteWasOn = st.companion.deleteShots;
     }
     const key = JSON.stringify([st.found, st.shots, st.history]);
     if (key !== last) { last = key; render(st); }  // only re-render when something changed, so images don't flicker
@@ -139,6 +178,25 @@
       const ok = r.ok;
       msg.className = ok ? "posted" : "failed";
       msg.textContent = ok ? "Saved. WoW uses it the next time you log in." : (await r.json()).error;
+    } catch {
+      msg.className = "failed";
+      msg.textContent = "Can't reach the Brag companion. Is it still running?";
+    }
+  });
+
+  $("#companion").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const body = Object.fromEntries(COMPANION_TOGGLES.map(k => [k, $("#" + k).checked]));
+    for (const k of COMPANION_NUMBERS) body[k] = Number($("#" + k).value);
+    if (body.deleteShots && !deleteWasOn &&
+        !confirm(`Delete every screenshot older than ${body.keepDays} days from your Screenshots folder, now and from now on?`)) return;
+    const msg = $("#cmsg");
+    try {
+      const r = await fetch("/api/companion", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const res = await r.json();
+      msg.className = r.ok ? "posted" : "failed";
+      msg.textContent = !r.ok ? res.error : "Saved." + (res.removed ? ` Deleted ${res.removed} old screenshot${res.removed === 1 ? "" : "s"}.` : "");
+      if (r.ok) { deleteWasOn = body.deleteShots; load(false).catch(() => {}); }
     } catch {
       msg.className = "failed";
       msg.textContent = "Can't reach the Brag companion. Is it still running?";
