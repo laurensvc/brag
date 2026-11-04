@@ -10,12 +10,24 @@ So there are two parts:
 1. Copy `Brag/` to `<WoW install>/_forever_/Interface/AddOns/` (use the folder your Forever client actually uses).
 2. Check the interface number in game with `/dump select(4, GetBuildInfo())` and put it in `Brag.toc`,
    or tick "Load out of date AddOns".
-3. In Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy URL.
-4. Run the companion while you play (needs Python 3; curl ships with macOS and Windows 10+):
+3. Start the companion (needs Python 3; curl ships with macOS and Windows 10+).
+   Point it at your Forever game folder, the one that holds `Screenshots` and `WTF`:
    ```
-   DISCORD_WEBHOOK=<url> python3 companion/watch.py "<WoW install>/_forever_/Screenshots"
+   python3 companion/watch.py "<WoW install>/_forever_"
    ```
-   On Windows PowerShell: `$env:DISCORD_WEBHOOK="<url>"; py companion\watch.py "C:\...\_forever_\Screenshots"`
+   On Windows: `py companion\watch.py "C:\...\_forever_"`
 
-Change `MIN_QUALITY` at the top of `Brag.lua` to post rare (3) drops too.
-Screenshots you take yourself (Print Screen) also get posted.
+   It opens **http://127.0.0.1:8765** in your browser, where you can change settings, browse past
+   screenshots (with what happened and whether they were posted) and see your Brag history. WoW doesn't need to be running.
+4. Set your Discord webhook (Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy URL),
+   either on that page or in game with `/brag` → **Save & reload**.
+5. Click **Test post** in `/brag` to check it all works. Keep the companion running while you play.
+
+Good to know:
+- WoW only reads and writes addon settings at login/logout. Change settings on the page while WoW is closed,
+  or in game with `/brag`; otherwise WoW overwrites the page's changes when you log out.
+- In-game events reach the page's history after you log out or `/reload`; screenshots and post status show up live.
+- Screenshots you take yourself (Print Screen) also get posted, unless Brag is disabled.
+- The page only listens on your own computer (127.0.0.1) and rejects requests from other websites.
+
+Tests: `python3 companion/test_watch.py`

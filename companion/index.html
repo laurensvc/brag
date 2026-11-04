@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brag</title>
+<style>
+  :root { --bg: #14110d; --panel: #1e1a14; --line: #3a3226; --text: #eee6d6; --muted: #a3967f; --gold: #e8b954; --ok: #6fcf7a; --bad: #ef6b5b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; padding: 16px 24px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 22px; color: var(--gold); }
+  h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  #notice { color: var(--bad); font-size: 14px; }
+  main { display: grid; grid-template-columns: 320px 1fr; gap: 24px; padding: 24px; max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; padding: 16px; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 24px; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+  input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--gold); }
+  .field { display: block; margin-top: 12px; }
+  .field span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  select, input[type=url] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
+  button { margin-top: 16px; background: var(--gold); color: #1a1408; border: 0; border-radius: 6px; padding: 9px 18px; font: inherit; font-weight: 600; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+  #msg { font-size: 14px; margin: 10px 0 0; }
+  #msg:empty { display: none; }
+  #shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .shot { display: block; color: inherit; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .shot:hover { border-color: var(--gold); }
+  .shot img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }
+  .shot div { padding: 10px 12px; }
+  .shot p { margin: 0; }
+  .cap { font-weight: 600; }
+  .meta { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+  .posted { color: var(--ok); }
+  .failed { color: var(--bad); }
+  #history { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+  #history li { padding: 6px 0; border-top: 1px solid var(--line); }
+  #history li:first-child { border-top: 0; }
+  #history time { display: block; color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header><h1>Brag</h1><span id="notice" role="status"></span></header>
+<main>
+  <div>
+    <section class="card">
+      <h2>Settings</h2>
+      <form id="settings">
+        <label class="row"><input type="checkbox" id="enabled"> Enabled</label>
+        <label class="row"><input type="checkbox" id="level"> Level ups</label>
+        <label class="row"><input type="checkbox" id="quest"> Quest turn-ins</label>
+        <label class="row"><input type="checkbox" id="loot"> Loot</label>
+        <label class="field"><span>Minimum loot quality</span>
+          <select id="minQuality">
+            <option value="2">Uncommon</option><option value="3">Rare</option>
+            <option value="4">Epic</option><option value="5">Legendary</option>
+          </select>
+        </label>
+        <label class="field"><span>Discord webhook URL</span>
+          <input type="url" id="webhook" placeholder="https://discord.com/api/webhooks/…" autocomplete="off">
+        </label>
+        <p class="hint">Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy URL.</p>
+        <button type="submit">Save</button>
+        <p id="msg" role="status"></p>
+        <p class="hint">Close WoW before saving here: WoW overwrites these settings with its in-game ones when you log out.</p>
+      </form>
+    </section>
+    <section class="card">
+      <h2>Activity</h2>
+      <ul id="history"></ul>
+    </section>
+  </div>
+  <section>
+    <h2>Screenshots</h2>
+    <div id="shots"></div>
+  </section>
+</main>
+<script>
+  const $ = s => document.querySelector(s);
+  const TOGGLES = ["enabled", "level", "quest", "loot"];
+  const fmt = t => new Date(t * 1000).toLocaleString();
+  let last = "";
+
+  function el(tag, props = {}, text) {
+    const e = Object.assign(document.createElement(tag), props);
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function render(st) {
+    $("#notice").textContent = st.found ? "" : "No Brag settings found yet. Log in to WoW once with Brag installed.";
+
+    const shots = $("#shots");
+    shots.replaceChildren();
+    if (!st.shots.length) shots.append(el("p", { className: "empty" }, "No screenshots yet."));
+    for (const s of st.shots) {
+      const url = "/shots/" + encodeURIComponent(s.name);
+      const card = el("a", { href: url, target: "_blank", rel: "noopener", className: "shot" });
+      const body = el("div");
+      const meta = el("p", { className: "meta" });
+      meta.append(el("span", {}, fmt(s.time)), el("span", { className: s.status.split(":")[0] }, s.status || "not posted"));
+      body.append(el("p", { className: "cap" }, s.caption || "Screenshot"), meta);
+      card.append(el("img", { src: url, loading: "lazy", alt: s.caption || s.name }), body);
+      shots.append(card);
+    }
+
+    const history = $("#history");
+    history.replaceChildren();
+    if (!st.history.length) history.append(el("li", { className: "empty" }, "Nothing yet. Events show up here after you log out or /reload in WoW."));
+    for (const e of st.history) {
+      const li = el("li");
+      li.append(el("time", {}, fmt(e.time)), e.text);
+      history.append(li);
+    }
+  }
+
+  async function load(first) {
+    const st = await (await fetch("/api/state")).json();
+    if (first) {
+      for (const k of TOGGLES) $("#" + k).checked = st.settings[k];
+      $("#minQuality").value = st.settings.minQuality;
+      $("#webhook").value = st.settings.webhook;
+    }
+    const key = JSON.stringify([st.found, st.shots, st.history]);
+    if (key !== last) { last = key; render(st); }  // only re-render when something changed, so images don't flicker
+  }
+
+  $("#settings").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const body = Object.fromEntries(TOGGLES.map(k => [k, $("#" + k).checked]));
+    body.minQuality = Number($("#minQuality").value);
+    body.webhook = $("#webhook").value.trim();
+    const msg = $("#msg");
+    try {
+      const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const ok = r.ok;
+      msg.className = ok ? "posted" : "failed";
+      msg.textContent = ok ? "Saved. WoW uses it the next time you log in." : (await r.json()).error;
+    } catch {
+      msg.className = "failed";
+      msg.textContent = "Can't reach the Brag companion. Is it still running?";
+    }
+  });
+
+  load(true).catch(() => { $("#notice").textContent = "Can't reach the Brag companion. Is it still running?"; });
+  setInterval(() => load(false).catch(() => {}), 5000);
+</script>
+</body>
+</html>

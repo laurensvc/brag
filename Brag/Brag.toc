@@ -1,5 +1,6 @@
 ## Interface: 16001
 ## Title: Brag
-## Notes: Screenshots level-ups, quest turn-ins and big drops (companion script posts them to Discord)
-## Version: 0.1
+## Notes: Screenshots level-ups, quest turn-ins and big drops for Discord. Type /brag for settings.
+## Version: 0.3
+## SavedVariables: BragDB, BragHistory
 Brag.lua
