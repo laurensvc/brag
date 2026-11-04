@@ -227,6 +227,7 @@ local function buildPanel()
     p:Hide()
     brag("test", "Brag test: if this shows up in Discord, you're all set!")
   end)
+  p:Hide() -- new frames start shown; /brag toggles it right after building
   return p
 end
 

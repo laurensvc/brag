@@ -469,6 +469,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     global GAME_DIR
     GAME_DIR = sys.argv[1]
+    sys.stdout.reconfigure(errors="replace")  # captions have emoji; a cp1252 pipe or log file must not crash the watcher
     os.makedirs(os.path.join(GAME_DIR, "Screenshots"), exist_ok=True)  # WoW only creates it on the first screenshot
     threading.Thread(target=watch, args=(GAME_DIR,), daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)

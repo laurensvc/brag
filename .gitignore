@@ -3,3 +3,4 @@ __pycache__/
 .DS_Store
 companion/brag-log.jsonl
 companion/brag-companion.json
+fake-wow/

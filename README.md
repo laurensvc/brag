@@ -44,7 +44,21 @@ encodes the event, your character, level, zone and the quest or item. The compan
 and posts the caption with the image. Screenshots you take yourself have no strip and go out without a caption.
 The strip format is documented next to `drawStrip` in `Brag/Brag.lua` and `read_strip` in `companion/watch.py`.
 
-Tests: `python3 companion/test_watch.py` (`py` on Windows)
+## Testing without WoW
+`companion/fakewow.py` runs the real addon in Lua 5.1 with a mock of the WoW API. It renders the screenshots
+WoW would take (banner and data strip included) and writes SavedVariables like a logout, so the real
+companion can post them to Discord:
+```
+python3 -m pip install lupa pillow
+python3 companion/fakewow.py fake-wow --webhook "https://discord.com/api/webhooks/..."   # /brag: paste, Save & reload
+python3 companion/watch.py fake-wow                                                     # in a second terminal
+python3 companion/fakewow.py fake-wow demo        # quest turn-in that levels up, a legendary, a Test post
+python3 companion/fakewow.py fake-wow level "quest=Bounty on Murlocs" "loot=Krol Blade:epic" print
+```
+Options: `--size 2560x1440`, `--ui-scale 0.71`, `--name`, `--zone`; `python3 companion/fakewow.py --help` lists the events.
+The mock only knows the API calls Brag makes and draws an idealized frame, so check real rendering in game.
+
+Tests: `python3 companion/test_watch.py` and `python3 companion/test_addon.py` (`py` on Windows)
 
 ## Releasing to CurseForge
 Pushing to `main` runs the tests. If the `## Version:` in `Brag/Brag.toc` is new (there's no `v<version>` tag yet),
