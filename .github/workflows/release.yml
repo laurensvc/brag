@@ -1,0 +1,107 @@
+# Tests every push and pull request. On main, a new "## Version:" in Brag/Brag.toc (one without a v<version> tag)
+# is zipped with Brag/ at the top (the folder name must match Brag.toc), uploaded to CurseForge if configured,
+# then tagged and published as a GitHub release. A failed upload leaves no tag, so the next push retries.
+# CurseForge setup: repository secret CF_API_TOKEN (https://legacy.curseforge.com/account/api-tokens)
+#                   repository variable CF_PROJECT_ID (numeric, from "About Project" on the CurseForge page)
+name: Test and release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: # rerun a failed upload by hand
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pillow
+      - run: python test_watch.py
+        working-directory: companion
+
+  release:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tag + GitHub release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags and history for the changelog
+
+      - name: Check for a new version
+        id: version
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_PROJECT_ID: ${{ vars.CF_PROJECT_ID }}
+        run: |
+          version=$(sed -n 's/^## Version: *//p' Brag/Brag.toc | tr -d '\r[:space:]')
+          [ -n "$version" ] || { echo "::error::No '## Version:' in Brag/Brag.toc"; exit 1; }
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already released; bump '## Version:' in Brag/Brag.toc to publish."
+            exit 0
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ -n "$CF_API_TOKEN" ] && [ -n "$CF_PROJECT_ID" ]; then
+            echo "curseforge=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Releasing v$version on GitHub only: set the CF_API_TOKEN secret and CF_PROJECT_ID variable to also upload to CurseForge."
+          fi
+
+      - name: Package
+        if: steps.version.outputs.version
+        run: |
+          version=${{ steps.version.outputs.version }}
+          zip -r "Brag-$version.zip" Brag -x '*.DS_Store'
+          prev=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          git log --no-merges --format='- %s' ${prev:+$prev..}HEAD > changelog.md
+          cat changelog.md
+
+      - name: Upload to CurseForge
+        if: steps.version.outputs.curseforge
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_PROJECT_ID: ${{ vars.CF_PROJECT_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # "## Interface: 16001" -> CurseForge game version "1.60.1" -> its numeric id
+          curl -sSf -H "X-Api-Token: $CF_API_TOKEN" https://wow.curseforge.com/api/game/versions > versions.json
+          python3 - <<'EOF'
+          import json, os, re, sys
+          toc = open("Brag/Brag.toc", encoding="utf-8").read()
+          interfaces = re.search(r"^## Interface: *(.+)$", toc, re.M).group(1).replace(" ", "").split(",")
+          names = [f"{int(i) // 10000}.{int(i) // 100 % 100}.{int(i) % 100}" for i in interfaces]
+          versions = json.load(open("versions.json"))
+          ids = [v["id"] for v in versions if v["name"] in names]
+          if len(ids) < len(names):
+              close = sorted({v["name"] for v in versions if v["name"].startswith(tuple(n.rsplit(".", 1)[0] for n in names))})
+              sys.exit(f"::error::CurseForge has no game version {names}. Close matches: {close}")
+          json.dump({
+              "changelog": open("changelog.md", encoding="utf-8").read() or "- Update",
+              "changelogType": "markdown",
+              "displayName": f"Brag {os.environ['VERSION']}",
+              "gameVersions": ids,
+              "releaseType": "release",
+          }, open("metadata.json", "w"))
+          print(f"Game versions {names} -> ids {ids}")
+          EOF
+          curl -sS --fail-with-body -H "X-Api-Token: $CF_API_TOKEN" \
+            -F "metadata=<metadata.json" \
+            -F "file=@Brag-$VERSION.zip" \
+            "https://wow.curseforge.com/api/projects/$CF_PROJECT_ID/upload-file"
+
+      - name: Tag and GitHub release
+        if: steps.version.outputs.version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release create "v$VERSION" "Brag-$VERSION.zip" --target "$GITHUB_SHA" --title "Brag $VERSION" --notes-file changelog.md
