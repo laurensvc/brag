@@ -4,8 +4,9 @@ settings, past screenshots and event history (works with WoW closed).
 
 Usage: python3 watch.py "<WoW install>/_forever_"   (opens http://127.0.0.1:8765)
 Needs Pillow: python3 -m pip install pillow
+On Windows, desktop.py runs the same companion from the system tray.
 """
-import glob, json, math, os, re, subprocess, sys, tempfile, threading, time, urllib.parse, webbrowser
+import collections, glob, json, math, os, re, subprocess, sys, tempfile, threading, time, urllib.parse, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -16,8 +17,13 @@ except ImportError:
 PORT = 8765
 ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
 HERE = os.path.dirname(os.path.abspath(__file__))
+PAGE = os.path.join(getattr(sys, "_MEIPASS", HERE), "index.html")  # _MEIPASS: inside the Windows app's bundle
+ASSETS = os.path.join(getattr(sys, "_MEIPASS", HERE), "assets")  # the page's textures and font (see assets/CREDITS.md)
+ASSET_TYPES = {".webp": "image/webp", ".ttf": "font/ttf"}
+# The desktop app points these at %APPDATA%\Brag, so settings survive updates.
 LOG = os.path.join(HERE, "brag-log.jsonl")
 CONFIG = os.path.join(HERE, "brag-companion.json")
+TEXT_LOG = None  # also write the companion's output to this file (the desktop app has no console)
 IMAGES = (".jpg", ".jpeg", ".png", ".tga")
 DEFAULTS = {"enabled": True, "level": True, "quest": True, "loot": True, "minQuality": 4, "webhook": ""}
 # Settings only the companion uses, so they live in its own file and can be changed while WoW runs.
@@ -33,6 +39,25 @@ HISTORY = re.compile(r"^BragHistory = \{(.*?)^\}$", re.S | re.M)
 CODES = re.compile(r"\|c(?:[0-9a-fA-F]{8}|n[^:]*:)|\|r|\|H[^|]*\|h|\|h")  # WoW color/link codes
 MARKDOWN = re.compile(r"([\\*_~`|<>\[\]()])")
 LOG_LOCK = threading.Lock()
+
+# Live state, shared with the page and the desktop app
+GAME_DIR = None  # the WoW folder; the watcher follows it when it changes
+PAUSED = threading.Event()  # new screenshots are skipped (not posted later) while set
+LINES = collections.deque(maxlen=200)  # recent output, for the page's Log card
+LISTENERS = []  # called with (name, status, plain caption) after each screenshot
+ON_SHOW = None  # POST /api/show calls this: a second Brag.exe asks the first to show its window
+
+
+def say(text):
+    """Report what the companion does: console, the page's Log card and TEXT_LOG."""
+    LINES.append({"time": time.time(), "text": text})
+    print(text)
+    if TEXT_LOG:
+        try:
+            with open(TEXT_LOG, "a", encoding="utf-8") as f:
+                f.write(time.strftime("%Y-%m-%d %H:%M:%S  ") + text + "\n")
+        except OSError:
+            pass
 
 
 # --- Brag's SavedVariables file (WTF/Account/<name>/SavedVariables/Brag.lua) ---
@@ -264,8 +289,9 @@ def post(path, text, webhook, retries, run=subprocess.run, sleep=time.sleep):
         cmd = ["curl", "-sS", "--max-time", "60", "-o", "-", "-w", "\n%{http_code}",
                "-F", f'payload_json=<"{slash(payload)}";type=application/json',
                "-F", f'files[0]=@"{slash(path)}";filename="{os.path.basename(path)}"', webhook]
+        no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # the tray app has no console for curl to borrow
         for attempt in range(retries + 1):
-            r = run(cmd, capture_output=True, encoding="utf-8", errors="replace")
+            r = run(cmd, capture_output=True, encoding="utf-8", errors="replace", creationflags=no_window)
             body, _, code = r.stdout.rpartition("\n")
             code = int(code) if code.strip().isdigit() else 0
             if 200 <= code < 300:
@@ -325,8 +351,8 @@ def cleanup(game_dir, cfg, now=None):
         if len(keep) != len(lines):
             write_atomic(LOG, "".join(keep))
     removed = 0
-    if cfg["deleteShots"]:
-        shots = os.path.join(game_dir, "Screenshots")
+    shots = os.path.join(game_dir, "Screenshots") if game_dir else ""
+    if cfg["deleteShots"] and os.path.isdir(shots):
         for name in os.listdir(shots):
             path = os.path.join(shots, name)
             try:
@@ -361,35 +387,64 @@ def handle(game_dir, name):
     return status, caption(payload, md=False)
 
 
-def watch(game_dir):
-    shots = os.path.join(game_dir, "Screenshots")
-    seen = set(os.listdir(shots))
-    cleaned = 0
-    while True:
-        if time.time() - cleaned > 3600:
-            cleanup(game_dir, load_companion())
-            cleaned = time.time()
-        time.sleep(2)
-        for name in sorted(set(os.listdir(shots)) - seen):
-            seen.add(name)
-            if not name.lower().endswith(IMAGES):
-                continue
+def check(watching):
+    """One pass of the watcher. `watching` is (Screenshots folder, names seen, last cleanup); returns the next one."""
+    shots, seen, cleaned = watching
+    if not GAME_DIR:
+        return None, set(), 0
+    if shots != os.path.join(GAME_DIR, "Screenshots"):  # first pass, or a new WoW folder
+        shots = os.path.join(GAME_DIR, "Screenshots")
+        os.makedirs(shots, exist_ok=True)  # WoW only creates it on the first screenshot
+        seen, cleaned = set(os.listdir(shots)), 0
+        say(f"Watching {shots}")
+    if time.time() - cleaned > 3600:
+        removed = cleanup(GAME_DIR, load_companion())
+        cleaned = time.time()
+        if removed:
+            say(f"Deleted {removed} old screenshot{'s' * (removed != 1)}")
+    for name in sorted(set(os.listdir(shots)) - seen):
+        seen.add(name)
+        if not name.lower().endswith(IMAGES):
+            continue
+        if PAUSED.is_set():
+            status, text = "skipped: paused", ""
+        else:
             try:
-                status, text = handle(game_dir, name)
+                status, text = handle(GAME_DIR, name)
             except Exception as e:  # keep watching whatever happens to one file
                 status, text = f"failed: {e}", ""
-            log(name, status, text)
-            print(f"{status}: {name}" + (f" ({text})" if text else ""))
+        log(name, status, text)
+        say(f"{status}: {name}" + (f" ({text})" if text else ""))
+        for fn in LISTENERS:
+            fn(name, status, text)
+    return shots, seen, cleaned
+
+
+def watch():
+    watching, error = (None, set(), 0), None
+    while True:
+        try:
+            watching, error = check(watching), None
+        except OSError as e:  # folder gone, drive unplugged: keep trying, but say so once
+            if str(e) != error:
+                error = str(e)
+                say(f"Can't read the Screenshots folder: {e}")
+            watching = (None, set(), 0)
+        time.sleep(2)
 
 
 # --- Local page ---
 
 def state(game_dir):
+    app = {"gameDir": game_dir or "", "paused": PAUSED.is_set(), "log": list(LINES)[::-1]}
+    if not game_dir:
+        return {"found": False, "settings": dict(DEFAULTS), "companion": load_companion(), "shots": [], "history": [], **app}
     db, history = load_saved(game_dir)
     for h in history:
         h["text"] = CODES.sub("", str(h.get("text", "")))
     shots = os.path.join(game_dir, "Screenshots")
-    times = {n: os.path.getmtime(os.path.join(shots, n)) for n in os.listdir(shots) if n.lower().endswith(IMAGES)}
+    names = os.listdir(shots) if os.path.isdir(shots) else []
+    times = {n: os.path.getmtime(os.path.join(shots, n)) for n in names if n.lower().endswith(IMAGES)}
     # shortcut: only the newest 60 screenshots are shown; add paging if people want to dig further back
     newest = sorted(times, key=times.get, reverse=True)[:60]
     done = statuses()
@@ -407,6 +462,7 @@ def state(game_dir):
         "shots": [{"name": n, "time": times[n], "status": done.get(n, {}).get("status", ""), "caption": shot_caption(n)}
                   for n in newest],
         "history": history[::-1][:100],
+        **app,
     }
 
 
@@ -430,13 +486,18 @@ class Handler(BaseHTTPRequestHandler):
         if not self.local():
             return self.send(403, "{}")
         if self.path == "/":
-            with open(os.path.join(HERE, "index.html"), "rb") as f:
+            with open(PAGE, "rb") as f:
                 return self.send(200, f.read(), "text/html; charset=utf-8")
         if self.path == "/api/state":
             return self.send(200, json.dumps(state(GAME_DIR)))
-        shots = os.path.join(GAME_DIR, "Screenshots")
+        asset = self.path.removeprefix("/assets/")
+        ctype = ASSET_TYPES.get(os.path.splitext(asset)[1])
+        if self.path.startswith("/assets/") and ctype and asset in os.listdir(ASSETS):  # listdir check blocks ../
+            with open(os.path.join(ASSETS, asset), "rb") as f:
+                return self.send(200, f.read(), ctype)
+        shots = os.path.join(GAME_DIR or "", "Screenshots")
         name = urllib.parse.unquote(self.path.removeprefix("/shots/"))
-        if self.path.startswith("/shots/") and name in os.listdir(shots):  # listdir check blocks ../ paths
+        if self.path.startswith("/shots/") and GAME_DIR and os.path.isdir(shots) and name in os.listdir(shots):  # blocks ../
             with open(os.path.join(shots, name), "rb") as f:
                 return self.send(200, f.read(), "image/png" if name.lower().endswith(".png") else "image/jpeg")
         self.send(404, "{}")
@@ -444,6 +505,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.local() or self.headers.get("Origin") not in ORIGINS:
             return self.send(403, "{}")
+        if self.path == "/api/show":
+            if ON_SHOW:
+                ON_SHOW()
+            return self.send(200 if ON_SHOW else 404, "{}")
         if self.path not in ("/api/settings", "/api/companion"):
             return self.send(404, "{}")
         try:
@@ -455,24 +520,45 @@ class Handler(BaseHTTPRequestHandler):
             if error:
                 return self.send(400, json.dumps({"error": error}))
             save_companion(new)
-            return self.send(200, json.dumps({"removed": cleanup(GAME_DIR, new)}))
+            removed = cleanup(GAME_DIR, new)
+            say("Posting settings saved" + (f"; deleted {removed} old screenshot{'s' * (removed != 1)}" if removed else ""))
+            return self.send(200, json.dumps({"removed": removed}))
         error = validate(new)
-        path = settings_file(GAME_DIR)
-        if not error and not path:
+        path = settings_file(GAME_DIR) if GAME_DIR else None
+        if not error and not GAME_DIR:
+            error = "Choose your WoW folder first."
+        elif not error and not path:
             error = "Log in to WoW once with Brag installed, so its settings file exists."
         if error:
             return self.send(400, json.dumps({"error": error}))
         save_settings(path, new)
+        say("In-game settings saved")
         self.send(200, "{}")
 
 
-def main():
+class Server(ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets a second program bind the same port, so a second Brag would silently share it.
+    allow_reuse_address = sys.platform != "win32"
+
+
+def start(game_dir):
+    """Serve the page and start watching game_dir (None: not chosen yet). Raises OSError if the port is taken."""
     global GAME_DIR
-    GAME_DIR = sys.argv[1]
-    sys.stdout.reconfigure(errors="replace")  # captions have emoji; a cp1252 pipe or log file must not crash the watcher
-    os.makedirs(os.path.join(GAME_DIR, "Screenshots"), exist_ok=True)  # WoW only creates it on the first screenshot
-    threading.Thread(target=watch, args=(GAME_DIR,), daemon=True).start()
-    server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    server = Server(("127.0.0.1", PORT), Handler)
+    GAME_DIR = game_dir
+    threading.Thread(target=watch, daemon=True).start()
+    return server
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    if sys.stdout:
+        sys.stdout.reconfigure(errors="replace")  # captions have emoji; a cp1252 pipe or log file must not crash it
+    try:
+        server = start(sys.argv[1])
+    except OSError:
+        sys.exit(f"Port {PORT} is in use: is Brag already running? Its page is http://127.0.0.1:{PORT}")
     url = f"http://127.0.0.1:{PORT}"
     print(f"Brag is running at {url} (Ctrl+C to stop)")
     webbrowser.open(url)

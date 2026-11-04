@@ -4,8 +4,9 @@ WoW addons are sandboxed: they can't make network calls, and they only write fil
 So there are two parts:
 
 1. **Brag** (the addon) shows a banner and takes a screenshot when you level up, turn in a quest, or loot an epic+ item.
-2. **companion/watch.py** watches your Screenshots folder and uploads every new screenshot to a Discord webhook,
+2. **The companion** watches your Screenshots folder and uploads every new screenshot to a Discord webhook,
    with a caption like "💎 **Thrall** looted **[Thunderfury]** (Legendary) · Level 60 Shaman · Molten Core".
+   On Windows it's a small tray app (**BragSetup.exe**); on Mac and Linux, the `companion/watch.py` script.
 
 ## Setup
 1. Download `Brag-<version>.zip` from the [latest release](https://github.com/laurensvc/brag/releases/latest) (or CurseForge)
@@ -14,15 +15,28 @@ So there are two parts:
    whose folder name doesn't match its `.toc` file ("Folder brag-main must contain a file named brag-main.toc").
 2. Check the interface number in game with `/dump select(4, GetBuildInfo())` and put it in `Brag.toc`,
    or tick "Load out of date AddOns".
-3. Start the companion. It needs Python 3 and Pillow (curl ships with macOS and Windows 10+).
-   Point it at your Forever game folder, the one that holds `Screenshots` and `WTF`:
+3. Start the companion.
+
+   **Windows:** download **BragSetup.exe** from the [latest release](https://github.com/laurensvc/brag/releases/latest/download/BragSetup.exe)
+   and run it (no admin needed; Windows may warn about an unknown publisher: More info → Run anyway). Brag finds
+   your WoW folder itself, or asks you for the `_forever_` folder, and then sits in the tray next to the clock:
+   - click the icon to open the Brag window (settings, screenshots, history and a log of every post);
+   - closing the window keeps Brag running in the tray; right-click → **Quit** stops it;
+   - right-click also has **Pause posting**, **Open Screenshots folder** and **Start with Windows**;
+   - the icon is gold while it works, grey when paused or not set up yet (hover it to see why), and red with a
+     Windows notification when a post fails.
+
+   Its settings and log live in `%APPDATA%\Brag`.
+
+   **Mac/Linux (or Windows without the app):** run the script. It needs Python 3 and Pillow (curl ships with
+   macOS and Windows 10+). Point it at your Forever game folder, the one that holds `Screenshots` and `WTF`:
    ```
    python3 -m pip install pillow
    python3 companion/watch.py "<WoW install>/_forever_"
    ```
    On Windows: `py -m pip install pillow`, then `py companion\watch.py "C:\...\_forever_"`
 
-   It opens **http://127.0.0.1:8765** in your browser, where you can change settings, browse past
+   It opens **http://127.0.0.1:8765** in your browser (the Windows app shows the same page in its window), where you can change settings, browse past
    screenshots (with what happened and whether they were posted) and see your Brag history. WoW doesn't need to be running.
 4. Set your Discord webhook (Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy URL),
    either on that page or in game with `/brag` → **Save & reload**.
@@ -58,12 +72,22 @@ python3 companion/fakewow.py fake-wow level "quest=Bounty on Murlocs" "loot=Krol
 Options: `--size 2560x1440`, `--ui-scale 0.71`, `--name`, `--zone`; `python3 companion/fakewow.py --help` lists the events.
 The mock only knows the API calls Brag makes and draws an idealized frame, so check real rendering in game.
 
-Tests: `python3 companion/test_watch.py` and `python3 companion/test_addon.py` (`py` on Windows)
+Tests: `python3 companion/test_watch.py` and `python3 companion/test_addon.py` (`py` on Windows), plus
+`py companion\test_desktop.py` for the Windows app.
+
+## Building the Windows app
+```
+py -m pip install -r windows\requirements.txt
+winget install JRSoftware.InnoSetup      # for the installer only
+.\windows\build.ps1                      # dist\Brag\Brag.exe and dist\BragSetup.exe
+```
+`py companion\desktop.py` runs the app from source without building. Point it at a `fakewow.py` folder to try it
+without WoW. The release workflow builds the installer with the same script on a Windows runner.
 
 ## Releasing to CurseForge
 Pushing to `main` runs the tests. If the `## Version:` in `Brag/Brag.toc` is new (there's no `v<version>` tag yet),
 GitHub Actions zips `Brag/`, uploads it to CurseForge as a release for the game version that matches `## Interface:`
-(16001 → 1.60.1), then tags it and creates a GitHub release with that zip and the commit list as changelog.
+(16001 → 1.60.1), then tags it and creates a GitHub release with that zip, `BragSetup.exe` and the commit list as changelog.
 Pushes that don't bump the version only run the tests.
 
 One-time setup:
@@ -72,3 +96,8 @@ gh secret set CF_API_TOKEN      # token from https://legacy.curseforge.com/accou
 gh variable set CF_PROJECT_ID   # numeric id from "About Project" on the CurseForge page
 ```
 Without them the workflow still makes the GitHub release and skips CurseForge with a warning. To retry a failed upload: Actions → Test and release → Run workflow.
+
+## Credits
+The companion page's look is ported from [warcraftcn/ui](https://github.com/TheOrcDev/warcraftcn-ui) (MIT); its textures
+and the [Cinzel](https://github.com/NDISCOVER/Cinzel) font (SIL OFL) are bundled in `companion/assets`, licenses in
+`companion/assets/CREDITS.md`.

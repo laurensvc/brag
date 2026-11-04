@@ -1,6 +1,7 @@
 # Tests every push and pull request. On main, a new "## Version:" in Brag/Brag.toc (one without a v<version> tag)
 # is zipped with Brag/ at the top (the folder name must match Brag.toc), uploaded to CurseForge if configured,
-# then tagged and published as a GitHub release. A failed upload leaves no tag, so the next push retries.
+# then tagged and published as a GitHub release with the Windows app (BragSetup.exe, built by windows/build.ps1).
+# A failed upload leaves no tag, so the next push retries.
 # CurseForge setup: repository secret CF_API_TOKEN (https://legacy.curseforge.com/account/api-tokens)
 #                   repository variable CF_PROJECT_ID (numeric, from "About Project" on the CurseForge page)
 name: Test and release
@@ -27,8 +28,27 @@ jobs:
       - run: python test_watch.py && python test_addon.py # test_addon runs Brag.lua in Lua 5.1 with a mock WoW API
         working-directory: companion
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -r windows/requirements.txt
+      - run: python test_desktop.py
+        working-directory: companion
+      - name: Install Inno Setup
+        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - run: ./windows/build.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: BragSetup
+          path: dist/BragSetup.exe
+          if-no-files-found: error
+
   release:
-    needs: test
+    needs: [test, windows]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -99,9 +119,15 @@ jobs:
             -F "file=@Brag-$VERSION.zip" \
             "https://wow.curseforge.com/api/projects/$CF_PROJECT_ID/upload-file"
 
+      - uses: actions/download-artifact@v8
+        if: steps.version.outputs.version
+        with:
+          name: BragSetup
+
       - name: Tag and GitHub release
         if: steps.version.outputs.version
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: gh release create "v$VERSION" "Brag-$VERSION.zip" --target "$GITHUB_SHA" --title "Brag $VERSION" --notes-file changelog.md
+        # BragSetup.exe keeps its name, so https://github.com/<repo>/releases/latest/download/BragSetup.exe always works
+        run: gh release create "v$VERSION" "Brag-$VERSION.zip" BragSetup.exe --target "$GITHUB_SHA" --title "Brag $VERSION" --notes-file changelog.md

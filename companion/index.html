@@ -5,49 +5,149 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Brag</title>
 <style>
-  :root { --bg: #14110d; --panel: #1e1a14; --line: #3a3226; --text: #eee6d6; --muted: #a3967f; --gold: #e8b954; --ok: #6fcf7a; --bad: #ef6b5b; }
+  /* Look ported from warcraftcn/ui (MIT); textures and the Cinzel font are bundled in assets/ (see assets/CREDITS.md) */
+  @font-face { font-family: "Cinzel"; src: url("/assets/Cinzel.ttf") format("truetype"); font-weight: 400 900; font-display: swap; }
+  :root {
+    --text: #f1e4c3; --muted: #b9a47c; --gold: #ffd100; --gold-soft: #e3b75a; --line: rgba(201, 162, 74, .22);
+    --ok: #1eff00; --bad: #ff5a3c; --ink: #0d0a07;
+    --title: "Cinzel", "Palatino Linotype", Georgia, serif;
+    --body: "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
-  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; padding: 16px 24px; border-bottom: 1px solid var(--line); }
-  h1 { margin: 0; font-size: 22px; color: var(--gold); }
-  h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
-  #notice { color: var(--bad); font-size: 14px; }
-  main { display: grid; grid-template-columns: 320px 1fr; gap: 24px; padding: 24px; max-width: 1400px; margin: 0 auto; }
-  @media (max-width: 800px) { main { grid-template-columns: 1fr; padding: 16px; } }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 24px; }
-  .row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
-  input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--gold); }
-  .field { display: block; margin-top: 12px; }
-  .field span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-  select, input[type=url], input[type=number] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
-  button { margin-top: 16px; background: var(--gold); color: #1a1408; border: 0; border-radius: 6px; padding: 9px 18px; font: inherit; font-weight: 600; cursor: pointer; }
-  :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
-  .hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
-  #msg, #cmsg { font-size: 14px; margin: 10px 0 0; }
-  #msg:empty, #cmsg:empty { display: none; }
-  #shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-  .shot { display: block; color: inherit; text-decoration: none; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .shot:hover { border-color: var(--gold); }
-  .shot img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }
-  .shot div { padding: 10px 12px; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--text); font: 16px/1.5 var(--body);
+    background: linear-gradient(rgba(8, 6, 4, .70), rgba(8, 6, 4, .88)), url("/assets/accordion-content-bg.webp") center / cover fixed, var(--ink);
+  }
+  header {
+    display: flex; align-items: center; gap: 20px; flex-wrap: wrap; min-height: 76px; padding: 14px 32px 22px;
+    background: url("/assets/accordion-header.webp") center bottom / 100% 100% no-repeat;
+  }
+  h1 {
+    margin: 0; font: 900 30px/1 var(--title); letter-spacing: .08em; color: var(--gold);
+    text-shadow: 0 0 14px rgba(255, 170, 0, .45), 0 2px 0 #000;
+  }
+  h2 {
+    margin: 0 0 14px; padding-bottom: 8px; font: 700 15px/1.2 var(--title); letter-spacing: .12em; text-transform: uppercase;
+    color: var(--gold-soft); text-shadow: 0 1px 0 #000;
+    border-bottom: 1px solid; border-image: linear-gradient(90deg, rgba(227, 183, 90, .8), transparent) 1;
+  }
+  #notice { font: 700 15px/1.3 var(--title); color: var(--bad); text-shadow: 0 0 10px rgba(255, 60, 20, .5), 0 1px 0 #000; }
+  main { padding: 20px 24px 24px; max-width: 1440px; margin: 0 auto; }
+  .panel.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 0 24px; align-items: start; }
+  .panel.screenshots { display: grid; grid-template-columns: 1fr 340px; gap: 24px; align-items: start; }
+  .panel.log { max-width: 1100px; }
+  @media (max-width: 820px) {
+    main { padding: 16px; } header { padding: 12px 16px 20px; } #tabs { padding: 12px 16px 0; }
+    .panel.screenshots { grid-template-columns: 1fr; }
+  }
+
+  /* Tabs: gold-trimmed plates, the active one lit */
+  #tabs { display: flex; gap: 8px; flex-wrap: wrap; max-width: 1440px; margin: 0 auto; padding: 14px 24px 0; }
+  #tabs .tab {
+    margin: 0; min-width: 150px; min-height: 48px; padding: 12px 26px;
+    background: url("/assets/tab-list.webp") center / 100% 100% no-repeat;
+    color: var(--muted); text-shadow: 0 1px 2px #000;
+  }
+  #tabs .tab[aria-selected=true] {
+    background-image: url("/assets/tab-list-active.webp"); color: var(--gold);
+    text-shadow: 0 0 10px rgba(255, 170, 0, .5), 0 1px 2px #000;
+  }
+
+  /* Panels: dark wood with iron corner brackets */
+  .card {
+    border: 30px solid transparent; border-image: url("/assets/dropdown-menu-bg.webp") 44 fill / 30px stretch;
+    padding: 0 4px 4px; margin-bottom: 20px; filter: drop-shadow(0 10px 18px rgba(0, 0, 0, .55));
+  }
+  .row { display: flex; align-items: center; gap: 12px; padding: 5px 0; cursor: pointer; }
+  input[type=checkbox] {
+    appearance: none; flex: none; width: 24px; height: 24px; margin: 0; cursor: pointer;
+    background: url("/assets/checkbox-default.webp") center / contain no-repeat;
+  }
+  input[type=checkbox]:checked { background-image: url("/assets/checkbox-default-checked.webp"); }
+  .field { display: block; margin-top: 14px; }
+  .field span { display: block; font: 700 12px/1.3 var(--title); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  select, input[type=url], input[type=number] {
+    width: 100%; color: var(--text); font: inherit; padding: 6px 8px;
+    border: 9px solid transparent; border-image: url("/assets/input-frame.webp") 22 fill / 9px stretch;
+    background: rgba(0, 0, 0, .6); background-clip: padding-box;
+  }
+  select {
+    appearance: none; padding-right: 30px; cursor: pointer;
+    background: rgba(0, 0, 0, .6) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23e3b75a' stroke-width='2'/%3E%3C/svg%3E") right 10px center / 12px no-repeat;
+    background-clip: padding-box;
+  }
+  option { background: #1a140d; color: var(--text); }
+  ::placeholder { color: #7d6f55; }
+
+  /* Buttons: blue plate in an iron frame */
+  button {
+    margin-top: 18px; min-width: 156px; min-height: 46px; padding: 10px 34px; border: 0; cursor: pointer;
+    font: 700 15px/1 var(--title); letter-spacing: .08em; color: #fff4cf; text-shadow: 0 1px 2px #000, 0 0 8px rgba(120, 170, 255, .35);
+    background: url("/assets/button-bg-with-frame.webp") center / 100% 100% no-repeat;
+    transition: filter .12s, transform .12s;
+  }
+  button:hover { filter: brightness(1.18); }
+  button:active { filter: brightness(.8); transform: scale(.97); }
+  :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+  .hint { font-size: 14px; color: var(--muted); margin: 12px 0 0; }
+  #msg, #cmsg, #fmsg { font-size: 15px; margin: 12px 0 0; }
+  #msg:empty, #cmsg:empty, #fmsg:empty { display: none; }
+  #folder p { margin: 0; overflow-wrap: anywhere; }
+
+  /* Screenshots: gold-trimmed frames */
+  #shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 18px; }
+  .shot {
+    display: block; color: inherit; text-decoration: none;
+    border: 11px solid transparent; border-image: url("/assets/tab-list.webp") 26 fill / 11px stretch;
+    filter: drop-shadow(0 8px 14px rgba(0, 0, 0, .5)); transition: transform .12s;
+  }
+  .shot:hover { border-image-source: url("/assets/tab-list-active.webp"); transform: translateY(-2px); }
+  /* a bit wider than 16:9 and anchored to the bottom, so the data strip at the very top is cropped out */
+  .shot img { display: block; width: 100%; aspect-ratio: 16 / 8.6; object-fit: cover; object-position: center bottom; background: #000; }
+  .shot div { padding: 10px 6px 4px; }
   .shot p { margin: 0; }
-  .cap { font-weight: 600; }
-  .meta { font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+  .cap { font-weight: 700; text-shadow: 0 1px 0 #000; }
+  .meta { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 12px; margin-top: 4px !important; }
+  .meta span { white-space: nowrap; }
   .posted { color: var(--ok); }
   .failed { color: var(--bad); }
-  #history { list-style: none; margin: 0; padding: 0; font-size: 14px; }
-  #history li { padding: 6px 0; border-top: 1px solid var(--line); }
-  #history li:first-child { border-top: 0; }
+  .skipped { color: var(--muted); }
+  /* item quality colors, as in game */
+  .q-Poor { color: #9d9d9d; } .q-Common { color: #fff; } .q-Uncommon { color: #1eff00; } .q-Rare { color: #3d9bff; }
+  .q-Epic { color: #c160ff; } .q-Legendary { color: #ff8000; } .q-Artifact { color: #e6cc80; }
+
+  #history, #log { list-style: none; margin: 0; padding: 0; }
+  #history { font-size: 15px; }
+  #history li, #log li { padding: 6px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+  #history li:first-child, #log li:first-child { border-top: 0; }
   #history time { display: block; color: var(--muted); font-size: 12px; }
-  .empty { color: var(--muted); }
+  #log { max-height: calc(100vh - 290px); min-height: 200px; overflow-y: auto; font: 13px/1.55 ui-monospace, Consolas, monospace; }
+  #log time { color: var(--muted); margin-right: 8px; }
+  .empty { color: var(--muted); font-style: italic; }
+  [hidden] { display: none !important; }
+
+  ::-webkit-scrollbar { width: 12px; }
+  ::-webkit-scrollbar-track { background: rgba(0, 0, 0, .35); }
+  ::-webkit-scrollbar-thumb { background: linear-gradient(90deg, #6b5426, #c9a24a, #6b5426); border-radius: 6px; border: 2px solid rgba(0, 0, 0, .5); }
 </style>
 </head>
 <body>
 <header><h1>Brag</h1><span id="notice" role="status"></span></header>
+<nav id="tabs" role="tablist" aria-label="Brag">
+  <button type="button" role="tab" class="tab" id="tab-settings" data-tab="settings" aria-controls="panel-settings">Settings</button>
+  <button type="button" role="tab" class="tab" id="tab-screenshots" data-tab="screenshots" aria-controls="panel-screenshots">Screenshots</button>
+  <button type="button" role="tab" class="tab" id="tab-log" data-tab="log" aria-controls="panel-log">Log</button>
+</nav>
 <main>
-  <div>
+  <div class="panel settings" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+    <section class="card" id="folder" hidden>
+      <h2>WoW folder</h2>
+      <p id="gameDir"></p>
+      <button type="button" id="choose">Change…</button>
+      <p id="fmsg" class="failed" role="status"></p>
+    </section>
     <section class="card">
-      <h2>Settings</h2>
+      <h2>In game</h2>
       <form id="settings">
         <label class="row"><input type="checkbox" id="enabled"> Enabled</label>
         <label class="row"><input type="checkbox" id="level"> Level ups</label>
@@ -101,15 +201,26 @@
         <p class="hint">These apply right away, even while WoW is running.</p>
       </form>
     </section>
+  </div>
+  <div class="panel screenshots" id="panel-screenshots" role="tabpanel" aria-labelledby="tab-screenshots" hidden>
+    <section>
+      <h2>Screenshots</h2>
+      <div id="shots"></div>
+    </section>
+    <div>
     <section class="card">
       <h2>Activity</h2>
       <ul id="history"></ul>
     </section>
+    </div>
   </div>
-  <section>
-    <h2>Screenshots</h2>
-    <div id="shots"></div>
-  </section>
+  <div class="panel log" id="panel-log" role="tabpanel" aria-labelledby="tab-log" hidden>
+    <section class="card">
+      <h2>Log</h2>
+      <p class="hint" style="margin: 0 0 12px">What the companion did, newest first. The Windows app also keeps it in %APPDATA%\Brag\brag.log.</p>
+      <ul id="log"></ul>
+    </section>
+  </div>
 </main>
 <script>
   const $ = s => document.querySelector(s);
@@ -126,8 +237,30 @@
     return e;
   }
 
+  // "💎 Thrall looted [Krol Blade] (Epic) · …": the item name gets its quality color
+  function captionEl(text) {
+    const p = el("p", { className: "cap" });
+    const m = /\[([^\]]+)\] \((Poor|Common|Uncommon|Rare|Epic|Legendary|Artifact)\)/.exec(text || "");
+    if (!m) { p.textContent = text || "Screenshot"; return p; }
+    p.append(text.slice(0, m.index), el("span", { className: "q-" + m[2] }, "[" + m[1] + "]"), text.slice(m.index + m[1].length + 2));
+    return p;
+  }
+
   function render(st) {
-    $("#notice").textContent = st.found ? "" : "No Brag settings found yet. Log in to WoW once with Brag installed.";
+    $("#notice").textContent = !st.gameDir ? "Choose your WoW folder to get started."
+      : !st.found ? "No Brag settings found yet. Log in to WoW once with Brag installed."
+      : st.paused ? "Posting is paused: new screenshots are skipped. Resume from the tray icon." : "";
+    $("#gameDir").textContent = st.gameDir || "Not chosen yet: pick the _forever_ folder in your WoW install.";
+    $("#choose").textContent = st.gameDir ? "Change…" : "Choose folder…";
+
+    const log = $("#log");
+    log.replaceChildren();
+    if (!st.log.length) log.append(el("li", { className: "empty" }, "Nothing yet."));
+    for (const l of st.log) {
+      const li = el("li", { className: l.text.split(/[ :]/)[0] });
+      li.append(el("time", {}, new Date(l.time * 1000).toLocaleTimeString()), l.text);
+      log.append(li);
+    }
 
     const shots = $("#shots");
     shots.replaceChildren();
@@ -138,7 +271,7 @@
       const body = el("div");
       const meta = el("p", { className: "meta" });
       meta.append(el("span", {}, fmt(s.time)), el("span", { className: s.status.split(/[ :]/)[0] }, s.status));
-      body.append(el("p", { className: "cap" }, s.caption || "Screenshot"), meta);
+      body.append(captionEl(s.caption), meta);
       card.append(el("img", { src: url, loading: "lazy", alt: s.caption || s.name }), body);
       shots.append(card);
     }
@@ -162,8 +295,9 @@
       for (const k of COMPANION_TOGGLES) $("#" + k).checked = st.companion[k];
       for (const k of COMPANION_NUMBERS) $("#" + k).value = st.companion[k];
       deleteWasOn = st.companion.deleteShots;
+      if (!tabChosen && !(st.gameDir && st.found && st.settings.webhook)) showTab("settings");
     }
-    const key = JSON.stringify([st.found, st.shots, st.history]);
+    const key = JSON.stringify([st.found, st.gameDir, st.paused, st.shots, st.history, st.log]);
     if (key !== last) { last = key; render(st); }  // only re-render when something changed, so images don't flicker
   }
 
@@ -202,6 +336,41 @@
       msg.textContent = "Can't reach the Brag companion. Is it still running?";
     }
   });
+
+  // Inside the Windows app (desktop.py) the page can also pick the WoW folder.
+  window.addEventListener("pywebviewready", () => { $("#folder").hidden = false; });
+  $("#choose").addEventListener("click", async () => {
+    const res = await window.pywebview.api.choose_folder();
+    $("#fmsg").textContent = res && res.error ? res.error : "";
+    if (res && res.gameDir) { last = ""; load(true).catch(() => {}); }  // new folder: new settings and screenshots
+  });
+
+  // Tabs: the URL hash remembers the open one (#/settings, #/screenshots, #/log; not #settings, which would scroll to that form)
+  const TABS = ["settings", "screenshots", "log"];
+  const fromHash = location.hash.slice(2);
+  let tabChosen = TABS.includes(fromHash);
+  function showTab(name, focus) {
+    for (const t of TABS) {
+      const tab = $("#tab-" + t), on = t === name;
+      tab.setAttribute("aria-selected", on);
+      tab.tabIndex = on ? 0 : -1;
+      $("#panel-" + t).hidden = !on;
+    }
+    if (focus) $("#tab-" + name).focus();
+    history.replaceState(null, "", "#/" + name);
+  }
+  for (const tab of document.querySelectorAll("[role=tab]")) {
+    tab.addEventListener("click", () => { tabChosen = true; showTab(tab.dataset.tab); });
+  }
+  $("#tabs").addEventListener("keydown", ev => {  // arrow keys move between tabs
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[ev.key];
+    if (!step) return;
+    const i = TABS.indexOf(document.activeElement.dataset.tab);
+    if (i < 0) return;
+    tabChosen = true;
+    showTab(TABS[(i + step + TABS.length) % TABS.length], true);
+  });
+  showTab(tabChosen ? fromHash : "screenshots");
 
   load(true).catch(() => { $("#notice").textContent = "Can't reach the Brag companion. Is it still running?"; });
   setInterval(() => load(false).catch(() => {}), 5000);

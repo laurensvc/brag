@@ -1,4 +1,4 @@
-import io, json, os, random, subprocess, tempfile, threading, time
+import io, json, os, random, subprocess, tempfile, threading, time, urllib.error, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from PIL import Image, ImageDraw
 import watch
@@ -201,5 +201,82 @@ with tempfile.TemporaryDirectory() as game:
     assert sorted(os.listdir(os.path.join(game, "Screenshots"))) == ["WoWScrnShot_1.jpg"]
 
 assert watch.open_when_ready("missing.jpg", timeout=1, sleep=lambda s: None) is None
+
+
+# --- the watcher: pausing, switching WoW folders, telling listeners ---
+
+with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+    watch.LOG, watch.CONFIG = os.path.join(a, "log.jsonl"), os.path.join(a, "cfg.json")
+    results, handled = [], []
+    real_handle, watch.handle = watch.handle, lambda game, name: handled.append((game, name)) or ("posted", "cap")
+    watch.LISTENERS.append(lambda *r: results.append(r))
+    try:
+        watch.GAME_DIR = None
+        assert watch.check((None, set(), 0)) == (None, set(), 0)
+        state = watch.state(None)  # no folder yet: the page still loads
+        assert state["gameDir"] == "" and state["shots"] == [] and not state["found"]
+
+        watch.GAME_DIR = a
+        noisy(8, 8).save(os.path.join(a, "before.jpg"))  # not in Screenshots: ignored
+        w = watch.check((None, set(), 0))
+        assert w[0] == os.path.join(a, "Screenshots") and os.path.isdir(w[0])  # created for WoW
+        noisy(8, 8).save(os.path.join(w[0], "one.jpg"))
+        with open(os.path.join(w[0], "notes.txt"), "w") as f:
+            f.write("x")
+        w = watch.check(w)
+        assert handled == [(a, "one.jpg")] and results == [("one.jpg", "posted", "cap")]
+
+        watch.PAUSED.set()
+        noisy(8, 8).save(os.path.join(w[0], "two.jpg"))
+        w = watch.check(w)
+        watch.PAUSED.clear()
+        w = watch.check(w)  # skipped while paused, and not posted after resuming
+        assert len(handled) == 1 and results[-1] == ("two.jpg", "skipped: paused", "")
+        assert watch.statuses()["two.jpg"]["status"] == "skipped: paused"
+
+        os.makedirs(os.path.join(b, "Screenshots"))
+        noisy(8, 8).save(os.path.join(b, "Screenshots", "old.jpg"))  # already there when we switch: not posted
+        watch.GAME_DIR = b
+        w = watch.check(w)
+        noisy(8, 8).save(os.path.join(b, "Screenshots", "new.jpg"))
+        w = watch.check(w)
+        assert handled[1:] == [(b, "new.jpg")]
+        assert any("Watching" in line["text"] and b in line["text"] for line in watch.LINES)
+        assert watch.state(b)["log"][0]["text"] == "posted: new.jpg (cap)"  # newest first
+    finally:
+        watch.handle, watch.GAME_DIR = real_handle, None
+        watch.LISTENERS.clear()
+
+# the page server: a second Brag asks the first to show its window; other sites can't
+shown = []
+watch.ON_SHOW = lambda: shown.append(1)
+server = watch.Server(("127.0.0.1", 0), watch.Handler)
+port = server.server_port
+threading.Thread(target=server.serve_forever, daemon=True).start()
+watch.ORIGINS = {f"http://127.0.0.1:{port}"}
+
+def call(path, origin, data=b"{}"):
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, headers={"Origin": origin})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+assert call("/api/show", f"http://127.0.0.1:{port}") == (200, {}) and shown == [1]
+assert call("/api/show", "https://evil.example")[0] == 403 and shown == [1]
+assert call("/api/settings", f"http://127.0.0.1:{port}", json.dumps(DEFAULTS).encode()) == (400, {"error": "Choose your WoW folder first."})
+with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state") as r:
+    assert json.loads(r.read())["gameDir"] == ""
+# the page's textures and font are served; nothing else from the folder is
+with urllib.request.urlopen(f"http://127.0.0.1:{port}/assets/Cinzel.ttf") as r:
+    assert r.headers["Content-Type"] == "font/ttf"
+for bad in ["/assets/CREDITS.md", "/assets/../watch.py", "/assets/..%2Fwatch.py"]:
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}{bad}")
+        raise AssertionError(bad)
+    except urllib.error.HTTPError as e:
+        assert e.code == 404, (bad, e.code)
+server.shutdown()
 
 print("ok")
