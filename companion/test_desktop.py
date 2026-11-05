@@ -79,17 +79,26 @@ with tempfile.TemporaryDirectory() as cli, tempfile.TemporaryDirectory() as app:
 
         with open(os.path.join(cli, "brag-companion.json"), "w") as f:
             f.write('{"keepDays": 99}')
-        assert desktop.import_cli_settings([cli]) == []  # only on the first start
-        assert desktop.import_cli_settings([cli], asked=True) == []  # never over the app's own settings
+        assert desktop.import_cli_settings([cli]) == []  # on its own, only on the first start
+        with open(watch.LOG, "a") as f:
+            f.write('{"name": "a.jpg", "status": "failed: x", "caption": "", "time": 2}\n')  # the app posted since
+        done = desktop.import_cli_settings([cli], asked=True)  # --import: settings kept, history merged
+        assert done[0].startswith("Not imported") and done[1].startswith("Imported the post history")
         assert watch.load_companion()["keepDays"] == 30
+        assert watch.statuses()["a.jpg"]["kind"] == "failed"  # the app's own entry wins
 
         os.remove(watch.CONFIG)
         with open(os.path.join(cli, "brag-companion.json"), "w") as f:
             f.write("{not json")
-        assert len(desktop.import_cli_settings([cli], asked=True)) == 1
+        assert desktop.import_cli_settings([cli], asked=True)[0].startswith("Imported ")
         assert watch.load_companion() == watch.COMPANION_DEFAULTS  # a corrupt file: defaults, no crash
         assert desktop.import_cli_settings([os.path.join(cli, "missing")], asked=True) == []
     finally:
         desktop.APP_CONFIG, watch.CONFIG, watch.LOG = real
+
+# command line
+a = desktop.parse_args(["--tray", "--import", "C:/old brag/companion", "--unknown"])
+assert a.tray and not a.browser and a.import_from == "C:/old brag/companion" and a.write_icon is None
+assert not desktop.parse_args([]).tray
 
 print("ok")

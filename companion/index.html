@@ -93,7 +93,8 @@
   .hint { font-size: 14px; color: var(--muted); margin: 12px 0 0; }
   #msg, #cmsg, #fmsg { font-size: 15px; margin: 12px 0 0; }
   #msg:empty, #cmsg:empty, #fmsg:empty { display: none; }
-  #folder button + button { margin-left: 10px; }
+  #folder button { min-width: 118px; padding: 10px 22px; }  /* Browse… and Save side by side in a narrow card */
+  #folder button + button { margin-left: 8px; }
 
   /* Screenshots: gold-trimmed frames */
   #shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 18px; }

@@ -79,8 +79,8 @@ def screenshots_dir(game_dir):
     return os.path.join(game_dir, "Screenshots")
 
 
-def plural(n, word):
-    return f"{n} {word}{'s' * (n != 1)}"
+def plural(n, word, words=None):
+    return f"{n} {word if n == 1 else words or word + 's'}"
 
 
 def report_error(what, e):
@@ -102,7 +102,9 @@ def tell_listeners(name, status, text):
         try:
             fn(name, status, text)
         except Exception as e:  # one broken listener must not stop the others or the watcher
-            report_error(f"{getattr(fn, '__name__', 'listener')} failed", e)
+            what = f"{getattr(fn, '__name__', 'listener')} failed"
+            report_error(what, e)
+            remember(Result("failed", f"{what}: {e}"))
 
 
 def say(text, kind=None):
@@ -352,7 +354,7 @@ def post(path, text, webhook, retries, run=subprocess.run, sleep=time.sleep):
             body, _, code = r.stdout.rpartition("\n")
             code = int(code) if code.strip().isdigit() else 0
             if 200 <= code < 300:
-                return Result("posted", f"after {attempt} {'retry' if attempt == 1 else 'retries'}" if attempt else "")
+                return Result("posted", f"after {plural(attempt, 'retry', 'retries')}" if attempt else "")
             if code == 429:
                 try:
                     wait = float(json.loads(body)["retry_after"])
@@ -364,7 +366,7 @@ def post(path, text, webhook, retries, run=subprocess.run, sleep=time.sleep):
                 return Result("failed", failure(code, body, r.stderr))  # retrying won't fix a bad webhook or a huge file
             if attempt < retries:
                 sleep(min(wait, 60))
-        tried = f" after {retries} {'retry' if retries == 1 else 'retries'}" if retries else ""
+        tried = f" after {plural(retries, 'retry', 'retries')}" if retries else ""
         return Result("failed", failure(code, body, r.stderr) + tried)
 
 
@@ -381,6 +383,8 @@ def statuses():
             for line in f:
                 try:
                     e = json.loads(line)
+                    if not isinstance(e, dict):
+                        continue
                     e.setdefault("kind", Result.from_text(e.get("status")).kind)  # written by an older Brag
                     out[e["name"]] = e
                 except (ValueError, KeyError, TypeError):
@@ -466,10 +470,13 @@ def watch_once(watching):
         watching.seen = set(os.listdir(watching.folder))
         say(f"Watching {watching.folder}")
     if time.time() - watching.cleaned > 3600:
-        removed = cleanup(game_dir, load_companion())
-        watching.cleaned = time.time()
-        if removed:
-            say(f"Deleted {plural(removed, 'old screenshot')}")
+        watching.cleaned = time.time()  # first, so a cleanup that keeps failing can't block posting
+        try:
+            removed = cleanup(game_dir, load_companion())
+            if removed:
+                say(f"Deleted {plural(removed, 'old screenshot')}")
+        except Exception as e:
+            report_error("Cleanup of old history failed (trying again in an hour)", e)
     for name in sorted(set(os.listdir(watching.folder)) - watching.seen):
         watching.seen.add(name)
         if not name.lower().endswith(IMAGES):
@@ -480,6 +487,7 @@ def watch_once(watching):
             try:
                 result, text = handle(game_dir, name)
             except Exception as e:  # keep watching whatever happens to one file
+                report_error(f"Error handling {name}", e)
                 result, text = Result("failed", str(e)), ""
         log(name, result, text)
         say(f"{result}: {name}" + (f" ({text})" if text else ""), result.kind)
@@ -497,28 +505,27 @@ def remember(result):
         LAST_FAILURE = None
 
 
-def guarded_pass(watching, error):
-    """One watcher pass that survives anything; returns (watching, error). `error` is the last error reported,
-    so a problem that repeats every pass is only reported once."""
+def guarded_pass(watching, last_reported):
+    """One watcher pass that survives anything; returns (watching, last_reported). last_reported is the error
+    reported last, so a problem that repeats every pass is reported once (Log, brag.log, a red tray icon)."""
     try:
         return watch_once(watching), None
-    except OSError as e:  # folder gone, drive unplugged: start over on the next pass
-        if str(e) != error:
-            say(f"Can't read the Screenshots folder: {e}")
-        return Watching(), str(e)
-    except Exception as e:  # a bug or bad data: keep watching, and make it visible
-        if repr(e) != error:
-            report_error("Watcher error", e)
-            result = Result("failed", f"watcher error: {e}")
+    except Exception as e:
+        # OSError: the folder is gone (drive unplugged, renamed) or locked. `watching` keeps what was seen, so
+        # screenshots taken meanwhile are posted once it's back. Anything else is a bug or bad data.
+        what = "Can't read the Screenshots folder" if isinstance(e, OSError) else "Watcher error"
+        if repr(e) != last_reported:
+            report_error(what, e)
+            result = Result("failed", f"{what[0].lower()}{what[1:]}: {e}")
             remember(result)
             tell_listeners("Brag", result, "")
         return watching, repr(e)
 
 
 def watch():
-    watching, error = Watching(), None
+    watching, last_reported = Watching(), None
     while True:
-        watching, error = guarded_pass(watching, error)
+        watching, last_reported = guarded_pass(watching, last_reported)
         time.sleep(2)
 
 
@@ -531,8 +538,9 @@ def status():
         return "setup", "No Brag settings found yet. Log in to WoW once with Brag installed."
     if PAUSED.is_set():
         return "paused", "Posting is paused: new screenshots are skipped. Resume from the tray icon."
-    if LAST_FAILURE:
-        return "failed", f"Last post failed: {LAST_FAILURE}"
+    failure = LAST_FAILURE  # once: the watcher thread may clear it meanwhile
+    if failure:
+        return "failed", f"Last post failed: {failure}"
     db, _ = load_saved(GAME_DIR)
     if not WEBHOOK.match(db.get("webhook", "")):
         return "setup", "No Discord webhook yet: paste it under Settings, or use /brag in WoW."
@@ -545,7 +553,7 @@ def status():
 
 def state(game_dir):
     kind, message = status()
-    app = {"gameDir": game_dir or "", "paused": PAUSED.is_set(), "log": list(LINES)[::-1],
+    app = {"gameDir": game_dir or "", "log": list(LINES)[::-1],
            "status": {"kind": kind, "message": message}, "canChooseFolder": ON_FOLDER is not None}
     if not game_dir:
         return {"found": False, "settings": dict(DEFAULTS), "companion": load_companion(), "shots": [], "history": [], **app}

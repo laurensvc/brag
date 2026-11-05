@@ -4,8 +4,9 @@
 # windows/build.ps1) go to a GitHub release tagged v<version>.
 # All or nothing: a failed test or Windows build releases nothing. Everything that can fail is done before the
 # CurseForge upload, with the GitHub release staged as a draft; it's published (which creates the tag) right
-# after the upload. So a failure leaves no tag and the next push (or Run workflow) retries without uploading
-# the same version to CurseForge twice.
+# after the upload. A failure before the upload leaves no tag, so the next push (or Run workflow) just retries.
+# The one step after the upload is publishing the draft, retried a few times; if even that fails, the job says
+# to publish the draft by hand instead of rerunning, which would upload the same version to CurseForge again.
 # CurseForge setup: repository secret CF_API_TOKEN (https://legacy.curseforge.com/account/api-tokens)
 #                   repository variable CF_PROJECT_ID (numeric, from "About Project" on the CurseForge page)
 name: Test and release
@@ -57,6 +58,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # tag + GitHub release
+    env:
+      GH_TOKEN: ${{ github.token }} # for gh
     steps:
       - uses: actions/checkout@v7
         with:
@@ -126,7 +129,6 @@ jobs:
       - name: Stage the GitHub release as a draft
         if: steps.version.outputs.version
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         # A draft has no tag yet. A draft left by an earlier failed run is replaced.
         # BragSetup.exe keeps its name, so https://github.com/<repo>/releases/latest/download/BragSetup.exe always works.
@@ -152,6 +154,11 @@ jobs:
       - name: Publish the GitHub release (creates the tag)
         if: steps.version.outputs.version
         env:
-          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: gh release edit "v$VERSION" --draft=false
+        run: |
+          for attempt in 1 2 3; do
+            gh release edit "v$VERSION" --draft=false && exit 0
+            sleep 10
+          done
+          echo "::error::v$VERSION is on CurseForge, but its GitHub release is still a draft. Publish the draft by hand (Releases, Edit, Publish release); don't rerun this workflow, or CurseForge gets v$VERSION twice."
+          exit 1

@@ -3,9 +3,14 @@
 #ifndef AppVersion
   #define AppVersion "0.0"
 #endif
+#define AppGuid "{6B0F8E2A-5C1D-4E7B-9A43-B7A2D51C9E10}"
+; Shared with companion\desktop.py (RUN_KEY, RUN_VALUE, MUTEX), which this script can't import: keep both in step.
+#define RunKey "Software\Microsoft\Windows\CurrentVersion\Run"
+#define RunValue "Brag"
+#define Mutex "BragCompanion"
 
 [Setup]
-AppId={{6B0F8E2A-5C1D-4E7B-9A43-B7A2D51C9E10}
+AppId={#StringChange(AppGuid, "{", "{{")}
 AppName=Brag
 AppVersion={#AppVersion}
 AppVerName=Brag {#AppVersion}
@@ -19,8 +24,8 @@ OutputDir={#OutputDir}
 OutputBaseFilename=BragSetup
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\Brag.exe
-; desktop.py's MUTEX: Setup asks you to quit Brag before updating or uninstalling it
-AppMutex=BragCompanion
+; Setup asks you to quit Brag before updating or uninstalling it
+AppMutex={#Mutex}
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
@@ -45,12 +50,12 @@ Name: "{autoprograms}\Brag"; Filename: "{app}\Brag.exe"
 Name: "{autodesktop}\Brag"; Filename: "{app}\Brag.exe"; Tasks: desktopicon
 
 [Registry]
-; The startup entry is desktop.py's RUN_KEY + RUN_VALUE, the one the tray menu's "Start with Windows" sets.
+; The startup entry is the one the tray menu's "Start with Windows" sets.
 ; First install: written if the player ticks the task. Update: rewritten (new path) only if it's already on.
 ; Uninstall: removed either way.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Brag"; ValueData: """{app}\Brag.exe"" --tray"; Tasks: autostart
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Brag"; ValueData: """{app}\Brag.exe"" --tray"; Check: IsUpdate and AutostartIsOn
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Brag"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; ValueData: """{app}\Brag.exe"" --tray"; Tasks: autostart
+Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; ValueData: """{app}\Brag.exe"" --tray"; Check: IsUpdate and AutostartIsOn
+Root: HKCU; Subkey: "{#RunKey}"; ValueType: none; ValueName: "{#RunValue}"; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\Brag.exe"; Description: "Open Brag"; Flags: nowait postinstall skipifsilent
@@ -59,11 +64,11 @@ Filename: "{app}\Brag.exe"; Description: "Open Brag"; Flags: nowait postinstall 
 // Brag is already installed for this user: an update, not a first install.
 function IsUpdate: Boolean;
 begin
-  Result := RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{6B0F8E2A-5C1D-4E7B-9A43-B7A2D51C9E10}_is1', 'UninstallString');
+  Result := RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#AppGuid}_is1', 'UninstallString');
 end;
 
 // "Start with Windows" is on right now (set by an earlier install or the tray menu).
 function AutostartIsOn: Boolean;
 begin
-  Result := RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Brag');
+  Result := RegValueExists(HKCU, '{#RunKey}', '{#RunValue}');
 end;

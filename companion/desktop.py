@@ -9,7 +9,7 @@
 Closing the window keeps Brag running in the tray; Quit in the tray menu stops it. Settings, the post log and
 brag.log live in %APPDATA%\\Brag. windows\\build.ps1 turns this into Brag.exe and BragSetup.exe.
 """
-import ctypes, json, os, shutil, string, sys, threading, time, urllib.request, webbrowser, winreg
+import argparse, ctypes, json, os, shutil, string, sys, threading, time, urllib.request, webbrowser, winreg
 from PIL import Image, ImageDraw, ImageFont
 import watch
 
@@ -55,6 +55,16 @@ def detect_game_dir():
     return None
 
 
+def parse_args(argv):
+    p = argparse.ArgumentParser(prog="Brag", description="Brag for Windows: posts WoW screenshots to Discord.")
+    p.add_argument("--tray", action="store_true", help="start in the tray with the window hidden")
+    p.add_argument("--browser", action="store_true", help="show the page in your browser instead of a window")
+    p.add_argument("--import", dest="import_from", metavar="FOLDER",
+                   help="copy posting settings and post history from the command-line companion's folder")
+    p.add_argument("--write-icon", metavar="PATH", help=argparse.SUPPRESS)  # used by windows\build.ps1
+    return p.parse_known_args(argv)[0]  # tolerate unknown flags: a windowed app has nowhere to print an error
+
+
 def load_app():
     try:
         with open(APP_CONFIG, encoding="utf-8") as f:
@@ -73,31 +83,45 @@ def use_folder(path):
     return None
 
 
+def save_app(**changes):
+    watch.write_atomic(APP_CONFIG, json.dumps({**load_app(), **changes}, indent=2))
+
+
 def import_cli_settings(folders, asked=False):
-    """Copy the command-line companion's posting settings and post log (it keeps them next to watch.py), so they
-    carry over to the app. Only copies, never over the app's own, and on its own only on the first start;
-    asked=True (--import) looks again. Returns the files copied."""
+    """Bring over the command-line companion's posting settings and post history (it keeps them next to
+    watch.py), so they carry over to the app. On its own this runs once, on the first start, and only finds them
+    when Brag runs from source; asked=True is --import "<folder>". Settings are only copied when the app has none
+    of its own; the post history is merged, older entries first. Nothing is moved or deleted.
+    Returns what it did, one line per file (also said in the Log)."""
     if load_app().get("importChecked") and not asked:
         return []
-    watch.write_atomic(APP_CONFIG, json.dumps({**load_app(), "importChecked": True}, indent=2))
-    copied = []
+    save_app(importChecked=True)
+    done = []
     for name, target in (("brag-companion.json", watch.CONFIG), ("brag-log.jsonl", watch.LOG)):
         source = next((os.path.join(f, name) for f in folders if os.path.isfile(os.path.join(f, name))), None)
         if not source or os.path.abspath(source) == os.path.abspath(target):
             continue
-        if os.path.exists(target):
-            if asked:
-                watch.say(f"Not imported {source}: Brag already has its own {name}")
-            continue
-        shutil.copy2(source, target)  # a bad settings file is fine: Brag falls back to the defaults
-        copied.append(source)
-        watch.say(f"Imported {source}")
-    return copied
+        if not os.path.exists(target):
+            shutil.copy2(source, target)  # a bad settings file is fine: Brag falls back to the defaults
+            done.append(f"Imported {source}")
+        elif name == "brag-log.jsonl":
+            with watch.LOG_LOCK:  # the app's own entries go last, so they win for the same screenshot
+                with open(source, encoding="utf-8", errors="replace") as f:
+                    older = f.read()
+                with open(target, encoding="utf-8", errors="replace") as f:
+                    own = f.read()
+                watch.write_atomic(target, older + ("\n" if older and not older.endswith("\n") else "") + own)
+            done.append(f"Imported the post history in {source}")
+        else:
+            done.append(f"Not imported {source}: Brag already has its own posting settings")
+    for line in done:
+        watch.say(line)
+    return done
 
 
 def set_game_dir(path):
     watch.GAME_DIR = path  # the watcher picks it up within 2 seconds
-    watch.write_atomic(APP_CONFIG, json.dumps({**load_app(), "gameDir": path}, indent=2))
+    save_app(gameDir=path)
     watch.say(f"WoW folder: {path}")
     refresh()
 
@@ -268,10 +292,14 @@ def warn_no_webview2():
     """Once per PC: why Brag uses the browser, and how to get its window back."""
     if load_app().get("webview2Warned"):
         return
-    watch.write_atomic(APP_CONFIG, json.dumps({**load_app(), "webview2Warned": True}, indent=2))
+    save_app(webview2Warned=True)
     message("Brag's window needs Microsoft Edge WebView2, which isn't installed on this PC, so Brag will show its "
             "page in your browser instead. It still runs from the tray as usual.\n\nTo get the window, install "
             f"WebView2 from Microsoft ({WEBVIEW2_DOWNLOAD}) and restart Brag.", 0x40)
+
+
+def nothing_to_import(folder):
+    return f"Nothing to import from {folder}: there's no brag-companion.json or brag-log.jsonl in it."
 
 
 def second_launch(tray_only, ask_to_show=already_running, tell=message):
@@ -292,9 +320,9 @@ def log_crashes():
 
 def main():
     global window, icon
-    if "--write-icon" in sys.argv:  # used by windows\build.ps1
-        path = sys.argv[sys.argv.index("--write-icon") + 1]
-        make_icon(COLORS["ok"], 256).save(path, sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 128, 256)])
+    args = parse_args(sys.argv[1:])
+    if args.write_icon:
+        make_icon(COLORS["ok"], 256).save(args.write_icon, sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 128, 256)])
         return
     import pystray, webview  # only needed for the app itself, not for --write-icon
 
@@ -307,13 +335,17 @@ def main():
     if os.path.exists(watch.TEXT_LOG) and os.path.getsize(watch.TEXT_LOG) > 1_000_000:
         os.replace(watch.TEXT_LOG, watch.TEXT_LOG + ".old")  # keep brag.log small
     log_crashes()
-    asked = sys.argv[sys.argv.index("--import") + 1:][:1] if "--import" in sys.argv else []
-    import_cli_settings(asked or [watch.HERE], asked=bool(asked))  # HERE: next to watch.py when run from source
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     mutex = kernel32.CreateMutexW(None, False, MUTEX)  # held until Brag exits
     if mutex and ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS: Brag is running
-        return second_launch("--tray" in sys.argv)
+        if args.import_from:  # the running Brag reads these files fresh, so importing from here works
+            done = import_cli_settings([args.import_from], asked=True)
+            return message("\n".join(done) or nothing_to_import(args.import_from), 0x40)
+        return second_launch(args.tray)
+    done = import_cli_settings([args.import_from] if args.import_from else [watch.HERE], asked=bool(args.import_from))
+    if args.import_from and not done:
+        watch.say(nothing_to_import(args.import_from))
     saved = load_app().get("gameDir")
     game = find_game_dir(saved) if saved and os.path.isdir(saved) else None
     try:
@@ -325,8 +357,8 @@ def main():
         game = detect_game_dir()
         if game:
             set_game_dir(game)
-    browser = "--browser" in sys.argv or not webview2_installed()
-    if browser and "--browser" not in sys.argv:
+    browser = args.browser or not webview2_installed()
+    if browser and not args.browser:
         watch.say("Microsoft Edge WebView2 isn't installed: Brag shows its page in your browser")
         warn_no_webview2()
     watch.say(f"Brag started, page at {URL}" + ("" if game else ". Choose your WoW folder under Settings."))
@@ -345,7 +377,7 @@ def main():
     watch.ON_SHOW = show
     watch.ON_FOLDER = use_folder
     threading.Thread(target=keep_refreshing, daemon=True, name="status").start()
-    hidden = "--tray" in sys.argv and bool(game)
+    hidden = args.tray and bool(game)
     if browser:
         if not hidden:
             webbrowser.open(URL)

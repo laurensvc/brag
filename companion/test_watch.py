@@ -191,7 +191,7 @@ with tempfile.TemporaryDirectory() as game:
     with open(watch.LOG, "w") as f:
         for name, age in [("old", 8), ("new", 1)]:
             f.write(json.dumps({"name": name, "status": "posted", "time": now - age * 86400}) + "\n")
-        f.write("garbage\n")
+        f.write("garbage\nnull\n42\n")  # not entries: skipped, never fatal
     old = os.path.join(game, "Screenshots", "old.jpg")
     noisy(8, 8).save(old)
     os.utime(old, (now - 8 * 86400, now - 8 * 86400))
@@ -254,24 +254,49 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         w = watch.watch_once(w)
         assert handled[-1] == (b, "after.jpg") and results[-1][0] == "after.jpg"
         assert any("broken failed: RuntimeError: tray went away" in line["text"] for line in watch.LINES)
+        assert watch.LAST_FAILURE == "broken failed: tray went away"
         watch.LISTENERS.remove(broken)
 
         # any error in a pass is reported once (log + listeners), and the next pass carries on
-        real_cleanup, watch.cleanup = watch.cleanup, lambda *a: 1 / 0
+        real_dir, watch.screenshots_dir = watch.screenshots_dir, lambda game: 1 / 0
         try:
-            w.cleaned = 0
             w, error = watch.guarded_pass(w, None)
             assert error and results[-1] == ("Brag", watch.Result("failed", "watcher error: division by zero"), "")
             assert watch.LAST_FAILURE == "watcher error: division by zero"  # the tray turns red
             n = len(results)
-            w.cleaned = 0
             w, error = watch.guarded_pass(w, error)  # same error again: not reported again
             assert len(results) == n
         finally:
-            watch.cleanup = real_cleanup
+            watch.screenshots_dir = real_dir
         noisy(8, 8).save(os.path.join(b, "Screenshots", "later.jpg"))
         w, error = watch.guarded_pass(w, error)
         assert error is None and handled[-1] == (b, "later.jpg")
+
+        # a cleanup that keeps failing is retried hourly, not every pass, so posting goes on
+        real_cleanup, watch.cleanup = watch.cleanup, lambda *a: 1 / 0
+        try:
+            w.cleaned = 0
+            noisy(8, 8).save(os.path.join(b, "Screenshots", "during.jpg"))
+            w, error = watch.guarded_pass(w, None)
+            assert error is None and handled[-1] == (b, "during.jpg") and w.cleaned > 0
+        finally:
+            watch.cleanup = real_cleanup
+
+        # the Screenshots folder going away: reported (tray red), then screenshots taken meanwhile get posted
+        real_listdir = os.listdir
+        def gone(path="."):
+            if "Screenshots" in str(path):
+                raise FileNotFoundError(2, "The system cannot find the path specified", str(path))
+            return real_listdir(path)
+        os.listdir = gone
+        try:
+            w, error = watch.guarded_pass(w, None)
+            assert error and watch.LAST_FAILURE.startswith("can't read the Screenshots folder")
+        finally:
+            os.listdir = real_listdir
+        noisy(8, 8).save(os.path.join(b, "Screenshots", "meanwhile.jpg"))
+        w, error = watch.guarded_pass(w, error)
+        assert error is None and handled[-1] == (b, "meanwhile.jpg")
         with open(watch.TEXT_LOG, encoding="utf-8") as f:
             detail = f.read()
         assert "Traceback" in detail and "ZeroDivisionError" in detail and "tray went away" in detail
