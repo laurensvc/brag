@@ -13,9 +13,9 @@ Source: Spec axis of the code review, finding (c)4.
 
 **Blocked by:** 05 (Starting at login stays in the tray)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The installer is downloaded, and the upload metadata built, before the CurseForge upload step
-- [ ] If the Windows job fails, neither CurseForge nor GitHub gets a release, and the workflow output says why
-- [ ] The workflow's header comment describes the all-or-nothing behaviour
-- [ ] The workflow still parses, and a push that doesn't bump the version only runs the test and Windows build jobs
+- [x] The installer is downloaded, and the upload metadata built, before the CurseForge upload step
+- [x] If the Windows job fails, neither CurseForge nor GitHub gets a release, and the workflow output says why
+- [x] The workflow's header comment describes the all-or-nothing behaviour
+- [x] The workflow still parses, and a push that doesn't bump the version only runs the test and Windows build jobs

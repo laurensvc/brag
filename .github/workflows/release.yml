@@ -1,7 +1,11 @@
-# Tests every push and pull request. On main, a new "## Version:" in Brag/Brag.toc (one without a v<version> tag)
-# is zipped with Brag/ at the top (the folder name must match Brag.toc), uploaded to CurseForge if configured,
-# then tagged and published as a GitHub release with the Windows app (BragSetup.exe, built by windows/build.ps1).
-# A failed upload leaves no tag, so the next push retries.
+# Tests and builds the Windows app on every push and pull request. On main, a new "## Version:" in Brag/Brag.toc
+# (one without a v<version> tag) is released: the addon zip (Brag/ at the top: the folder name must match Brag.toc)
+# goes to CurseForge if configured, and both the zip and the Windows app (BragSetup.exe, built by
+# windows/build.ps1) go to a GitHub release tagged v<version>.
+# All or nothing: a failed test or Windows build releases nothing. Everything that can fail is done before the
+# CurseForge upload, with the GitHub release staged as a draft; it's published (which creates the tag) right
+# after the upload. So a failure leaves no tag and the next push (or Run workflow) retries without uploading
+# the same version to CurseForge twice.
 # CurseForge setup: repository secret CF_API_TOKEN (https://legacy.curseforge.com/account/api-tokens)
 #                   repository variable CF_PROJECT_ID (numeric, from "About Project" on the CurseForge page)
 name: Test and release
@@ -86,11 +90,15 @@ jobs:
           git log --no-merges --format='- %s' ${prev:+$prev..}HEAD > changelog.md
           cat changelog.md
 
-      - name: Upload to CurseForge
+      - uses: actions/download-artifact@v8
+        if: steps.version.outputs.version
+        with:
+          name: BragSetup
+
+      - name: Prepare the CurseForge upload
         if: steps.version.outputs.curseforge
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_PROJECT_ID: ${{ vars.CF_PROJECT_ID }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           # "## Interface: 16001" -> CurseForge game version "1.60.1" -> its numeric id
@@ -114,20 +122,36 @@ jobs:
           }, open("metadata.json", "w"))
           print(f"Game versions {names} -> ids {ids}")
           EOF
+
+      - name: Stage the GitHub release as a draft
+        if: steps.version.outputs.version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        # A draft has no tag yet. A draft left by an earlier failed run is replaced.
+        # BragSetup.exe keeps its name, so https://github.com/<repo>/releases/latest/download/BragSetup.exe always works.
+        run: |
+          if [ "$(gh release view "v$VERSION" --json isDraft -q .isDraft 2>/dev/null)" = "true" ]; then
+            gh release delete "v$VERSION" --yes
+          fi
+          gh release create "v$VERSION" "Brag-$VERSION.zip" BragSetup.exe --draft \
+            --target "$GITHUB_SHA" --title "Brag $VERSION" --notes-file changelog.md
+
+      - name: Upload to CurseForge
+        if: steps.version.outputs.curseforge
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_PROJECT_ID: ${{ vars.CF_PROJECT_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
           curl -sS --fail-with-body -H "X-Api-Token: $CF_API_TOKEN" \
             -F "metadata=<metadata.json" \
             -F "file=@Brag-$VERSION.zip" \
             "https://wow.curseforge.com/api/projects/$CF_PROJECT_ID/upload-file"
 
-      - uses: actions/download-artifact@v8
-        if: steps.version.outputs.version
-        with:
-          name: BragSetup
-
-      - name: Tag and GitHub release
+      - name: Publish the GitHub release (creates the tag)
         if: steps.version.outputs.version
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
-        # BragSetup.exe keeps its name, so https://github.com/<repo>/releases/latest/download/BragSetup.exe always works
-        run: gh release create "v$VERSION" "Brag-$VERSION.zip" BragSetup.exe --target "$GITHUB_SHA" --title "Brag $VERSION" --notes-file changelog.md
+        run: gh release edit "v$VERSION" --draft=false
