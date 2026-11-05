@@ -301,6 +301,7 @@
       deleteWasOn = st.companion.deleteShots;
       $("#gameDirInput").value = st.gameDir;
       if (!tabChosen && !(st.gameDir && st.found && st.settings.webhook)) showTab("settings");
+      if (!st.gameDir && st.canChooseFolder) askForFolder();
     }
     const key = JSON.stringify([st.status, st.gameDir, st.shots, st.history, st.log]);
     if (key !== last) { last = key; render(st); }  // only re-render when something changed, so images don't flicker
@@ -350,6 +351,21 @@
     if (res.gameDir) { last = ""; load(true).catch(() => {}); }  // new folder: new settings and screenshots
   }
   window.addEventListener("pywebviewready", () => { $("#browse").hidden = false; });
+
+  // No WoW folder yet (Brag didn't find one): ask right away, once per page load. In the app window that's the
+  // folder dialog, as soon as the window's bridge is ready; in a browser, the text field gets the focus.
+  let askedForFolder = false;
+  function askForFolder() {
+    if (askedForFolder) return;
+    askedForFolder = true;
+    showTab("settings");
+    const browse = () => $("#browse").click();
+    if (window.pywebview && window.pywebview.api) browse();
+    else {
+      window.addEventListener("pywebviewready", browse, { once: true });
+      $("#gameDirInput").focus();
+    }
+  }
   $("#browse").addEventListener("click", async () => {
     const res = await window.pywebview.api.choose_folder();
     if (res) folderResult(res);  // null: the dialog was cancelled

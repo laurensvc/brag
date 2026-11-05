@@ -11,9 +11,9 @@ Source: Spec axis of the code review, finding (a), first-run folder picker.
 
 **Blocked by:** 07 (Works on PCs without WebView2)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Fresh settings and no WoW in the usual places: the window opens with the folder dialog showing
-- [ ] A WoW folder found automatically or saved earlier: no dialog
-- [ ] Picking the install folder works (it finds _forever_ inside); picking an unrelated folder shows the explanation
-- [ ] The WoW folder card is reachable even if the bridge-ready signal never arrives
+- [x] Fresh settings and no WoW in the usual places: the window opens with the folder dialog showing
+- [x] A WoW folder found automatically or saved earlier: no dialog
+- [x] Picking the install folder works (it finds _forever_ inside); picking an unrelated folder shows the explanation
+- [x] The WoW folder card is reachable even if the bridge-ready signal never arrives
