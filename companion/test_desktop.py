@@ -31,4 +31,13 @@ assert desktop.launch_command().endswith('desktop.py" --tray') and "pythonw.exe"
 icon = desktop.make_icon(desktop.COLORS["failed"])
 assert icon.size == (64, 64) and icon.getpixel((32, 4))[:3] == desktop.COLORS["failed"]
 
+# a second launch while Brag runs: the player's launch shows the window, a login launch stays quiet
+asked, told = [], []
+desktop.second_launch(True, lambda: asked.append(1) or True, told.append)
+assert asked == [] and told == []
+desktop.second_launch(False, lambda: asked.append(1) or True, told.append)
+assert asked == [1] and told == []
+desktop.second_launch(False, lambda: False, told.append)  # the running Brag didn't answer
+assert told and "already running" in told[0]
+
 print("ok")

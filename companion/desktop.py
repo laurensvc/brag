@@ -213,6 +213,15 @@ def message(text):
     ctypes.windll.user32.MessageBoxW(None, text, "Brag", 0x10)  # MB_ICONERROR
 
 
+def second_launch(tray_only, ask_to_show=already_running, tell=message):
+    """Brag is already running. Launched by the player: show its window. Launched at login (--tray): do nothing,
+    so Windows starting Brag never pops the window up."""
+    if tray_only:
+        return
+    if not ask_to_show():
+        tell("Brag is already running: look for its icon in the tray (the ^ next to the clock).")
+
+
 def log_crashes():
     def report(kind, exc):
         watch.say(f"{kind}: {type(exc).__name__}: {exc}")
@@ -241,9 +250,7 @@ def main():
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     mutex = kernel32.CreateMutexW(None, False, MUTEX)  # held until Brag exits
     if mutex and ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS: Brag is running
-        if not already_running():
-            message("Brag is already running: look for its icon in the tray (the ^ next to the clock).")
-        return
+        return second_launch("--tray" in sys.argv)
     saved = load_app().get("gameDir")
     game = find_game_dir(saved) if saved and os.path.isdir(saved) else None
     try:
