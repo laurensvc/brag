@@ -243,6 +243,45 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         assert handled[1:] == [(b, "new.jpg")]
         assert any("Watching" in line["text"] and b in line["text"] for line in watch.LINES)
         assert watch.state(b)["log"][0]["text"] == "posted: new.jpg (cap)"  # newest first
+
+        # a broken listener doesn't stop the other listeners, and the error is in the log
+        def broken(*r):
+            raise RuntimeError("tray went away")
+        watch.LISTENERS.insert(0, broken)
+        noisy(8, 8).save(os.path.join(b, "Screenshots", "after.jpg"))
+        w = watch.watch_once(w)
+        assert handled[-1] == (b, "after.jpg") and results[-1][0] == "after.jpg"
+        assert any("broken failed: RuntimeError: tray went away" in line["text"] for line in watch.LINES)
+        watch.LISTENERS.remove(broken)
+
+        # any error in a pass is reported once (log + listeners), and the next pass carries on
+        real_cleanup, watch.cleanup = watch.cleanup, lambda *a: 1 / 0
+        try:
+            w.cleaned = 0
+            w, error = watch.guarded_pass(w, None)
+            assert error and results[-1] == ("Brag", "failed: watcher error: division by zero", "")
+            n = len(results)
+            w.cleaned = 0
+            w, error = watch.guarded_pass(w, error)  # same error again: not reported again
+            assert len(results) == n
+        finally:
+            watch.cleanup = real_cleanup
+        noisy(8, 8).save(os.path.join(b, "Screenshots", "later.jpg"))
+        w, error = watch.guarded_pass(w, error)
+        assert error is None and handled[-1] == (b, "later.jpg")
+
+        # switching the WoW folder mid-pass: this pass finishes in the old folder, the next one moves
+        for n in ("x1.jpg", "x2.jpg"):
+            noisy(8, 8).save(os.path.join(b, "Screenshots", n))
+        def switch(game, name):
+            watch.GAME_DIR = a
+            handled.append((game, name))
+            return "posted", ""
+        watch.handle = switch
+        w = watch.watch_once(w)
+        assert handled[-2:] == [(b, "x1.jpg"), (b, "x2.jpg")] and results[-1][1] == "posted"
+        w = watch.watch_once(w)
+        assert w.folder == os.path.join(a, "Screenshots")
     finally:
         watch.handle, watch.GAME_DIR = real_handle, None
         watch.LISTENERS.clear()

@@ -15,9 +15,9 @@ Source: Spec axis of the code review, findings (c)2 and (c)3.
 
 **Blocked by:** 01 (Tidy the watcher's internals)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A test with a listener that raises shows the watcher still handles the next screenshot, and the error appears in the companion's log
-- [ ] A test that switches the WoW folder during a pass shows no screenshot is handled against the wrong folder and no false "failed" is logged
-- [ ] In the tray app, an error in a pass turns the icon red with the error in its tooltip; the next successful post clears it
-- [ ] All existing tests pass
+- [x] A test with a listener that raises shows the watcher still handles the next screenshot, and the error appears in the companion's log
+- [x] A test that switches the WoW folder during a pass shows no screenshot is handled against the wrong folder and no false "failed" is logged
+- [x] In the tray app, an error in a pass turns the icon red with the error in its tooltip; the next successful post clears it
+- [x] All existing tests pass

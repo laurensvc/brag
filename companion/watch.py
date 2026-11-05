@@ -6,7 +6,7 @@ Usage: python3 watch.py "<WoW install>/_forever_"   (opens http://127.0.0.1:8765
 Needs Pillow: python3 -m pip install pillow
 On Windows, desktop.py runs the same companion from the system tray.
 """
-import collections, dataclasses, glob, json, math, os, re, subprocess, sys, tempfile, threading, time, urllib.parse, webbrowser
+import collections, dataclasses, glob, json, math, os, re, subprocess, sys, tempfile, threading, time, traceback, urllib.parse, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -55,6 +55,28 @@ def screenshots_dir(game_dir):
 
 def plural(n, word):
     return f"{n} {word}{'s' * (n != 1)}"
+
+
+def report_error(what, e):
+    """Say an unexpected error in one line; the full traceback goes to TEXT_LOG (or the console) for debugging."""
+    say(f"{what}: {type(e).__name__}: {e}")
+    detail = "".join(traceback.format_exception(e))
+    try:
+        if TEXT_LOG:
+            with open(TEXT_LOG, "a", encoding="utf-8") as f:
+                f.write(detail)
+        elif sys.stderr:
+            sys.stderr.write(detail)
+    except (OSError, ValueError):
+        pass
+
+
+def tell_listeners(name, status, text):
+    for fn in LISTENERS:
+        try:
+            fn(name, status, text)
+        except Exception as e:  # one broken listener must not stop the others or the watcher
+            report_error(f"{getattr(fn, '__name__', 'listener')} failed", e)
 
 
 def say(text):
@@ -405,16 +427,18 @@ class Watching:
 
 
 def watch_once(watching):
-    """Handle the screenshots that appeared since the last pass; returns what to remember for the next one."""
-    if not GAME_DIR:
+    """Handle the screenshots that appeared since the last pass; returns what to remember for the next one.
+    `watching` is updated in place as screenshots are handled, so an error halfway doesn't handle them twice."""
+    game_dir = GAME_DIR  # once per pass: a folder change mid-pass applies from the next pass
+    if not game_dir:
         return Watching()
-    if watching.folder != screenshots_dir(GAME_DIR):  # first pass, or a new WoW folder
-        watching = Watching(screenshots_dir(GAME_DIR))
+    if watching.folder != screenshots_dir(game_dir):  # first pass, or a new WoW folder
+        watching = Watching(screenshots_dir(game_dir))
         os.makedirs(watching.folder, exist_ok=True)  # WoW only creates it on the first screenshot
         watching.seen = set(os.listdir(watching.folder))
         say(f"Watching {watching.folder}")
     if time.time() - watching.cleaned > 3600:
-        removed = cleanup(GAME_DIR, load_companion())
+        removed = cleanup(game_dir, load_companion())
         watching.cleaned = time.time()
         if removed:
             say(f"Deleted {plural(removed, 'old screenshot')}")
@@ -426,26 +450,35 @@ def watch_once(watching):
             status, text = "skipped: paused", ""
         else:
             try:
-                status, text = handle(GAME_DIR, name)
+                status, text = handle(game_dir, name)
             except Exception as e:  # keep watching whatever happens to one file
                 status, text = f"failed: {e}", ""
         log(name, status, text)
         say(f"{status}: {name}" + (f" ({text})" if text else ""))
-        for fn in LISTENERS:
-            fn(name, status, text)
+        tell_listeners(name, status, text)
     return watching
+
+
+def guarded_pass(watching, error):
+    """One watcher pass that survives anything; returns (watching, error). `error` is the last error reported,
+    so a problem that repeats every pass is only reported once."""
+    try:
+        return watch_once(watching), None
+    except OSError as e:  # folder gone, drive unplugged: start over on the next pass
+        if str(e) != error:
+            say(f"Can't read the Screenshots folder: {e}")
+        return Watching(), str(e)
+    except Exception as e:  # a bug or bad data: keep watching, and make it visible
+        if repr(e) != error:
+            report_error("Watcher error", e)
+            tell_listeners("Brag", f"failed: watcher error: {e}", "")
+        return watching, repr(e)
 
 
 def watch():
     watching, error = Watching(), None
     while True:
-        try:
-            watching, error = watch_once(watching), None
-        except OSError as e:  # folder gone, drive unplugged: keep trying, but say so once
-            if str(e) != error:
-                error = str(e)
-                say(f"Can't read the Screenshots folder: {e}")
-            watching = Watching()
+        watching, error = guarded_pass(watching, error)
         time.sleep(2)
 
 
