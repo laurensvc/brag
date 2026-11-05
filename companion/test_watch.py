@@ -104,6 +104,10 @@ assert caption(LOOT, md=False) == ("💎 Thrall looted [Thunderfury, Blessed Bla
 assert caption(QUEST).startswith("📜 **Jaïna\\_\\*** completed **The \\[Defias\\] Brotherhood @everyone**")
 assert caption("1\tlevel\tThrall\tShaman\t42\tOrgrimmar\t\t") == "🎉 **Thrall** reached **level 42**!\n-# Shaman · Orgrimmar"
 assert caption("1\tlevel\tThrall\t\t42\t\t\t") == "🎉 **Thrall** reached **level 42**!"
+assert caption("1\tboss\tThrall\tShaman\t60\tMolten Core\tMajordomo *Executus*\t") == (
+    "⚔️ **Thrall** defeated **Majordomo \\*Executus\\***!\n-# Level 60 Shaman · Molten Core")
+assert caption("1\tdeath\tThrall\tShaman\t60\tMolten Core\t\t", md=False) == "💀 Thrall died · Level 60 Shaman · Molten Core"
+assert validate({**DEFAULTS, "death": "no"}) and validate({k: v for k, v in DEFAULTS.items() if k != "boss"})
 assert caption("2\tfuture\tformat") == caption(None) == caption("1\tdance\ta\tb\tc\td\te\tf") == ""
 
 
@@ -161,6 +165,13 @@ body = received["body"]
 sent = json.loads(body.split(b'name="payload_json"')[1].split(b"\r\n\r\n", 1)[1].split(b"\r\n--")[0])
 assert sent == {"content": caption(QUEST), "allowed_mentions": {"parse": []}}, sent
 assert b'filename="WoWScrnShot_110426_201500.jpg"' in body and b"\xff\xd8" in body
+# the webhook test: just the text, no file
+server = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+status = post(None, watch.TEST_TEXT, f"http://127.0.0.1:{server.server_port}/hook", 0)
+server.shutdown()
+assert status == watch.Result("posted"), status
+assert b"filename=" not in received["body"] and "Brag test".encode() in received["body"]
 
 
 # --- the whole flow for one screenshot, and cleanup ---
@@ -349,6 +360,40 @@ assert call("/api/folder", me, b'{"path": " "}')[0] == 400
 assert call("/api/folder", me, b'{"path": "C:/wow"}')[0] == 200
 assert call("/api/folder", "https://evil.example", b'{"path": "C:/wow"}')[0] == 403
 watch.ON_FOLDER = None
+# Send test message: checks the URL in the field (no WoW folder or settings file needed) and reports what Discord said
+real_post, posted = watch.post, []
+watch.post = lambda path, text, hook, retries: posted.append((path, hook, retries)) or watch.Result("failed", "webhook was deleted (HTTP 404)")
+try:
+    assert call("/api/test", me, b'{"webhook": " "}') == (400, {"error": "Paste your Discord webhook URL first."})
+    assert call("/api/test", me, b'{"webhook": "https://evil.example/x"}') == (400, {"error": "That isn't a Discord webhook URL"})
+    assert call("/api/test", me, b"nope")[0] == 400 and posted == []
+    assert call("/api/test", me, json.dumps({"webhook": f" {HOOK} "}).encode()) == (200, {"kind": "failed", "reason": "webhook was deleted (HTTP 404)"})
+    assert posted == [(None, HOOK, 0)] and watch.LINES[-1]["text"] == "Test message failed: webhook was deleted (HTTP 404)"
+    watch.post = lambda *a: watch.Result("posted")
+    assert call("/api/test", me, json.dumps({"webhook": HOOK}).encode()) == (200, {"kind": "posted", "reason": ""})
+    assert call("/api/test", "https://evil.example", json.dumps({"webhook": HOOK}).encode())[0] == 403
+finally:
+    watch.post = real_post
+
+# the Discord link is kept by the app; the Advanced form leaves it out and keeps it; the addon can be (re)installed
+with tempfile.TemporaryDirectory() as game:
+    watch.CONFIG = os.path.join(game, "cfg.json")
+    post_json = lambda path, data: call(path, me, json.dumps(data).encode())
+    assert post_json("/api/webhook", {"webhook": "https://evil.example/x"})[0] == 400
+    assert post_json("/api/webhook", {"webhook": f" {HOOK} "}) == (200, {}) and watch.load_companion()["webhook"] == HOOK
+    assert post_json("/api/companion", {**COMPANION_DEFAULTS, "retries": 1} | {"webhook": HOOK})[0] == 200
+    cfg = {k: v for k, v in COMPANION_DEFAULTS.items() if k != "webhook"}
+    assert post_json("/api/companion", {**cfg, "retries": 2})[0] == 200
+    assert watch.load_companion()["retries"] == 2 and watch.load_companion()["webhook"] == HOOK
+    assert post_json("/api/companion", {**cfg, "extra": 1})[0] == 400
+    assert post_json("/api/webhook", {"webhook": ""}) == (200, {}) and watch.load_companion()["webhook"] == ""
+    assert post_json("/api/addon", {}) == (400, {"error": "Choose your WoW folder first."})
+    watch.GAME_DIR = game
+    assert post_json("/api/addon", {}) == (200, {"version": watch.addon_version(watch.ADDON)})
+    watch.GAME_DIR = None
+assert watch.webhook_for({"webhook": "in game"}, {"webhook": "app"}) == "app"
+assert watch.webhook_for({"webhook": "in game"}, {"webhook": ""}) == "in game" and watch.webhook_for({}, {"webhook": ""}) == ""
+assert validate({k: v for k, v in DEFAULTS.items() if k != "webhook"}) is None  # the page no longer sends it
 # the page's textures and font are served; nothing else from the folder is
 with urllib.request.urlopen(f"http://127.0.0.1:{port}/assets/Cinzel.ttf") as r:
     assert r.headers["Content-Type"] == "font/ttf"
@@ -367,23 +412,60 @@ assert R.from_text("failed: webhook was deleted (HTTP 404)") == R("failed", "web
 assert R.from_text("skipped: paused") == R("skipped", "paused") and R.from_text("").kind == "skipped"
 assert str(R("posted")) == "posted" and str(R("skipped", "paused")) == "skipped: paused"
 
+# the addon: installed when Brag first looks at a WoW folder, updated when Brag carries a newer one, a newer one kept
+with tempfile.TemporaryDirectory() as game:
+    target = watch.addon_dir(game)
+    ours = watch.addon_version(watch.ADDON)
+    assert ours and watch.addon_status(game) == ("missing", None)
+    watch.GAME_DIR = game
+    watch.watch_once(watch.Watching())
+    assert watch.addon_status(game) == ("ok", ours)
+    with open(os.path.join(watch.ADDON, "Brag.lua"), "rb") as a, open(os.path.join(target, "Brag.lua"), "rb") as b:
+        assert a.read() == b.read()
+    with open(os.path.join(target, "Brag.toc"), "w") as f:
+        f.write("## Interface: 11507\n## Version: 0.1\n")
+    assert watch.addon_status(game) == ("outdated", "0.1")
+    watch.ensure_addon(game)
+    assert watch.addon_status(game) == ("ok", ours) and "/reload" in watch.LINES[-1]["text"]
+    with open(os.path.join(target, "Brag.toc"), "w") as f:
+        f.write("## Version: 99.0\n")  # from CurseForge, newer than this Brag's
+    watch.ensure_addon(game)
+    assert watch.addon_status(game) == ("ok", "99.0")
+    watch.GAME_DIR = None
+with tempfile.TemporaryDirectory() as game:
+    os.makedirs(os.path.join(game, "Interface"))
+    with open(os.path.join(game, "Interface", "AddOns"), "w") as f:
+        f.write("not a folder")  # can't install here: reported, not raised
+    watch.ensure_addon(game)
+    assert watch.addon_status(game)[0] == "missing" and "Couldn't install" in watch.LINES[-1]["text"]
+
 # one status for the tray and the page, the most important first
 with tempfile.TemporaryDirectory() as game:
+    watch.CONFIG = os.path.join(game, "cfg.json")
     watch.GAME_DIR, watch.LAST_FAILURE = None, None
     assert watch.status()[0] == "setup" and "WoW folder" in watch.status()[1]
     watch.GAME_DIR = game
-    assert watch.status()[0] == "setup" and "No Brag settings" in watch.status()[1]
+    assert watch.status()[0] == "setup" and "addon isn't in WoW yet" in watch.status()[1]
+    steps = watch.state(game)["setup"]
+    assert steps["folder"] and steps["addon"] == "missing" and steps["canInstall"] and not steps["webhook"] and not steps["played"]
+    watch.install_addon(game)
+    assert watch.status()[0] == "setup" and "Discord link" in watch.status()[1]  # no WoW login needed any more
+    watch.save_companion({**watch.load_companion(), "webhook": HOOK})  # the app's link is enough to post
+    assert watch.status()[0] == "ok"
+    watch.save_companion({**watch.load_companion(), "webhook": ""})
     saved = os.path.join(game, "WTF", "Account", "ME", "SavedVariables")
     os.makedirs(saved)
     with open(os.path.join(saved, "Brag.lua"), "w") as f:
         f.write('BragDB = {\n["enabled"] = false,\n}\n')
-    assert watch.status()[0] == "setup" and "webhook" in watch.status()[1]
+    assert watch.status()[0] == "setup" and "Discord link" in watch.status()[1]
     with open(os.path.join(saved, "Brag.lua"), "w") as f:
-        f.write(f'BragDB = {{\n["webhook"] = "{HOOK}",\n["enabled"] = false,\n}}\n')
+        f.write(f'BragDB = {{\n["webhook"] = "{HOOK}",\n["enabled"] = false,\n}}\n')  # the link from /brag works too
     assert watch.status()[0] == "off"
     with open(os.path.join(saved, "Brag.lua"), "w") as f:
         f.write(f'BragDB = {{\n["webhook"] = "{HOOK}",\n["enabled"] = true,\n}}\n')
-    assert watch.status() == ("ok", "Watching for screenshots.")
+    assert watch.status() == ("ok", "Ready. Play WoW: your big moments get posted to Discord.")
+    steps = watch.state(game)["setup"]
+    assert steps["addon"] == "ok" and steps["webhook"] and steps["played"]  # the settings file: WoW ran Brag
     watch.remember(R("failed", "webhook was deleted (HTTP 404)"))
     assert watch.status() == ("failed", "Last post failed: webhook was deleted (HTTP 404)")
     watch.PAUSED.set()

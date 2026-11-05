@@ -24,6 +24,7 @@ Run $py -m PyInstaller --noconfirm --clean --windowed --name Brag `
   --icon (Join-Path $build 'brag.ico') `
   --add-data "$(Join-Path $root 'companion\index.html');." `
   --add-data "$(Join-Path $root 'companion\assets');assets" `
+  --add-data "$(Join-Path $root 'Brag');Brag" `
   --hidden-import pystray._win32 `
   --distpath $dist --workpath (Join-Path $build 'pyinstaller') --specpath $build `
   (Join-Path $root 'companion\desktop.py')

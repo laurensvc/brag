@@ -6,7 +6,7 @@ Usage: python3 watch.py "<WoW install>/_forever_"   (opens http://127.0.0.1:8765
 Needs Pillow: python3 -m pip install pillow
 On Windows, desktop.py runs the same companion from the system tray.
 """
-import collections, dataclasses, glob, json, math, os, re, subprocess, sys, tempfile, threading, time, traceback, urllib.parse, webbrowser
+import collections, dataclasses, glob, json, math, os, re, shutil, subprocess, sys, tempfile, threading, time, traceback, urllib.parse, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -21,14 +21,20 @@ BUNDLE = getattr(sys, "_MEIPASS", HERE)  # where the page's files are: here, or 
 PAGE = os.path.join(BUNDLE, "index.html")
 ASSETS = os.path.join(BUNDLE, "assets")  # the page's textures and font (see assets/CREDITS.md)
 ASSET_TYPES = {".webp": "image/webp", ".ttf": "font/ttf"}
+# The addon Brag installs into WoW: the repo's Brag folder, or its copy inside the Windows app's bundle.
+ADDON = os.path.join(BUNDLE, "Brag") if hasattr(sys, "_MEIPASS") else os.path.normpath(os.path.join(HERE, "..", "Brag"))
 # The desktop app points these at %APPDATA%\Brag, so settings survive updates.
 LOG = os.path.join(HERE, "brag-log.jsonl")
 CONFIG = os.path.join(HERE, "brag-companion.json")
 TEXT_LOG = None  # also write the companion's output to this file (the desktop app has no console)
 IMAGES = (".jpg", ".jpeg", ".png", ".tga")
-DEFAULTS = {"enabled": True, "level": True, "quest": True, "loot": True, "minQuality": 4, "webhook": ""}
+DEFAULTS = {"enabled": True, "level": True, "quest": True, "loot": True, "boss": True, "death": True,
+            "minQuality": 4, "webhook": ""}
+TOGGLES = [k for k, v in DEFAULTS.items() if isinstance(v, bool)]
 # Settings only the companion uses, so they live in its own file and can be changed while WoW runs.
-COMPANION_DEFAULTS = {"caption": True, "retries": 3, "maxHeight": 1080, "jpegQuality": 85, "keepDays": 7, "deleteShots": False}
+# webhook: the Discord link set in the app; it wins over the one typed in game (/brag), which is the fallback.
+COMPANION_DEFAULTS = {"caption": True, "retries": 3, "maxHeight": 1080, "jpegQuality": 85, "keepDays": 7, "deleteShots": False,
+                      "webhook": ""}
 HEIGHTS = (0, 720, 1080, 1440, 2160)  # 0 = keep the original size
 MAX_BYTES = 8 * 1024 * 1024  # smallest Discord webhook upload limit (servers without boosts)
 QUALITY = {0: "Poor", 1: "Common", 2: "Uncommon", 3: "Rare", 4: "Epic", 5: "Legendary", 6: "Artifact"}
@@ -184,13 +190,14 @@ def save_settings(path, new):
 
 def validate(s):
     """Return an error message, or None if the in-game settings from the page are valid."""
-    if not isinstance(s, dict) or set(s) != set(DEFAULTS):
+    # the webhook may be left out: the page sets the app's Discord link instead, keeping the in-game one
+    if not isinstance(s, dict) or not set(DEFAULTS) - {"webhook"} <= set(s) <= set(DEFAULTS):
         return "Bad request"
-    if not all(isinstance(s[k], bool) for k in ("enabled", "level", "quest", "loot")):
+    if not all(isinstance(s[k], bool) for k in TOGGLES):
         return "Bad request"
     if type(s["minQuality"]) is not int or not 2 <= s["minQuality"] <= 5:
         return "Minimum quality must be Uncommon to Legendary"
-    if not isinstance(s["webhook"], str) or (s["webhook"] and not WEBHOOK.match(s["webhook"])):
+    if not isinstance(s.get("webhook", ""), str) or (s.get("webhook") and not WEBHOOK.match(s["webhook"])):
         return "That isn't a Discord webhook URL"
     return None
 
@@ -212,6 +219,8 @@ def validate_companion(s):
         return "JPEG quality must be 40 to 95"
     if not num("keepDays", 1, 365):
         return "Keep history for 1 to 365 days"
+    if not isinstance(s["webhook"], str) or (s["webhook"] and not WEBHOOK.match(s["webhook"])):
+        return "That isn't a Discord webhook link"
     return None
 
 
@@ -227,6 +236,67 @@ def load_companion():
 
 def save_companion(cfg):
     write_atomic(CONFIG, json.dumps(cfg, indent=2))
+
+
+def webhook_for(db, cfg):
+    """The Discord link to post with: the app's, else the one typed in game."""
+    return cfg.get("webhook") or db.get("webhook", "")
+
+
+# --- The addon in WoW's AddOns folder ---
+
+def addon_dir(game_dir):
+    return os.path.join(game_dir, "Interface", "AddOns", "Brag")
+
+
+def addon_version(folder):
+    """The ## Version: in folder's Brag.toc; None without one, "?" if it has no version line."""
+    try:
+        with open(os.path.join(folder, "Brag.toc"), encoding="utf-8", errors="replace") as f:
+            m = re.search(r"^## Version:\s*(\S+)", f.read(), re.M)
+    except OSError:
+        return None
+    return m.group(1) if m else "?"
+
+
+def version_key(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v or ""))
+
+
+def addon_status(game_dir):
+    """("missing" | "outdated" | "ok", the installed version). "ok" also covers a newer one (from CurseForge)."""
+    have, ours = addon_version(addon_dir(game_dir)), addon_version(ADDON)
+    if have is None:
+        return "missing", None
+    if ours and version_key(have) < version_key(ours):
+        return "outdated", have
+    return "ok", have
+
+
+def install_addon(game_dir):
+    """Copy Brag's addon into the WoW folder. The .toc goes last, so a copy that fails halfway reads as outdated
+    and is retried. Raises OSError."""
+    target = addon_dir(game_dir)
+    os.makedirs(target, exist_ok=True)
+    for name in sorted(os.listdir(ADDON), key=lambda n: n.endswith(".toc")):
+        if os.path.isfile(os.path.join(ADDON, name)):
+            shutil.copy2(os.path.join(ADDON, name), os.path.join(target, name))
+    say(f"Installed the Brag addon {addon_version(ADDON)} in {target}")
+
+
+def ensure_addon(game_dir):
+    """Install the addon if it's missing, or update it if Brag carries a newer one. Never raises."""
+    if not os.path.isfile(os.path.join(ADDON, "Brag.toc")):
+        return  # nothing to install from (shouldn't happen)
+    state, have = addon_status(game_dir)
+    if state == "ok":
+        return
+    try:
+        install_addon(game_dir)
+        if state == "outdated":
+            say(f"Updated the addon from {have}: type /reload in WoW, or log in again, to load it")
+    except OSError as e:
+        report_error(f"Couldn't install the Brag addon in {addon_dir(game_dir)}", e)
 
 
 # --- Reading the screenshot: Brag's data strip (see drawStrip in Brag.lua) ---
@@ -288,6 +358,8 @@ def caption(payload, md=True):
         "level": f"🎉 {who} reached {bold('level ' + level)}!",
         "quest": f"📜 {who} completed {bold(detail)}",
         "loot": f"💎 {who} looted {bold('[' + detail + ']')}" + (f" ({q})" if q else ""),
+        "boss": f"⚔️ {who} defeated {bold(detail)}!",
+        "death": f"💀 {who} died",
         "test": f"✅ Brag test from {who}: if you can read this, you're all set!",
     }.get(kind)
     if not head:
@@ -339,15 +411,18 @@ def failure(code, body, err):
 
 
 def post(path, text, webhook, retries, run=subprocess.run, sleep=time.sleep):
-    """Upload one image, retrying rate limits and server/network errors. Returns the status for the log."""
+    """Upload one image (path None: just the text), retrying rate limits and server/network errors.
+    Returns the status for the log."""
     with tempfile.TemporaryDirectory() as d:
         payload = os.path.join(d, "payload.json")
         with open(payload, "w", encoding="utf-8") as f:  # a file, not an argument: keeps emoji and accents intact on Windows
             json.dump({"content": text, "allowed_mentions": {"parse": []}}, f)  # no @everyone from item names
         slash = lambda p: p.replace("\\", "/")  # curl reads \ inside quotes as an escape; Windows accepts /
         cmd = ["curl", "-sS", "--max-time", "60", "-o", "-", "-w", "\n%{http_code}",
-               "-F", f'payload_json=<"{slash(payload)}";type=application/json',
-               "-F", f'files[0]=@"{slash(path)}";filename="{os.path.basename(path)}"', webhook]
+               "-F", f'payload_json=<"{slash(payload)}";type=application/json']
+        if path:
+            cmd += ["-F", f'files[0]=@"{slash(path)}";filename="{os.path.basename(path)}"']
+        cmd.append(webhook)
         no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # the tray app has no console for curl to borrow
         for attempt in range(retries + 1):
             r = run(cmd, capture_output=True, encoding="utf-8", errors="replace", creationflags=no_window)
@@ -368,6 +443,22 @@ def post(path, text, webhook, retries, run=subprocess.run, sleep=time.sleep):
                 sleep(min(wait, 60))
         tried = f" after {plural(retries, 'retry', 'retries')}" if retries else ""
         return Result("failed", failure(code, body, r.stderr) + tried)
+
+
+TEST_TEXT = "✅ Brag test: this webhook works. Your WoW screenshots will show up here."
+
+
+def test_webhook(webhook):
+    """Post a test message to the webhook the player typed (saved or not). Returns (Result, or an error message
+    when it isn't a webhook URL). No retries: the player is waiting on the button."""
+    webhook = webhook.strip() if isinstance(webhook, str) else ""
+    if not webhook:
+        return None, "Paste your Discord webhook URL first."
+    if not WEBHOOK.match(webhook):
+        return None, "That isn't a Discord webhook URL"
+    result = post(None, TEST_TEXT, webhook, 0)
+    say(f"Test message {result}", result.kind)
+    return result, None
 
 
 def log(name, result, text=""):
@@ -433,7 +524,7 @@ def handle(game_dir, name):
     payload, crop = read_strip(img) if img else (None, 0)
     db, _ = load_saved(game_dir)  # re-read each time so settings changes apply
     cfg = load_companion()
-    webhook = db.get("webhook", "")
+    webhook = webhook_for(db, cfg)
     if not img:
         status = Result("failed", "couldn't read the screenshot")
     elif not db.get("enabled", True):
@@ -469,6 +560,7 @@ def watch_once(watching):
         os.makedirs(watching.folder, exist_ok=True)  # WoW only creates it on the first screenshot
         watching.seen = set(os.listdir(watching.folder))
         say(f"Watching {watching.folder}")
+        ensure_addon(game_dir)
     if time.time() - watching.cleaned > 3600:
         watching.cleaned = time.time()  # first, so a cleanup that keeps failing can't block posting
         try:
@@ -533,30 +625,45 @@ def status():
     """What state Brag is in, as (kind, message), the most important first. The tray icon and the page both show
     this. kind: "setup" (something to set up), "paused", "failed" (the last post), "off" or "ok"."""
     if not GAME_DIR:
-        return "setup", "Choose your WoW folder to get started."
-    if not settings_file(GAME_DIR):
-        return "setup", "No Brag settings found yet. Log in to WoW once with Brag installed."
+        return "setup", "Step 1: choose your WoW folder under Settings."
+    if addon_status(GAME_DIR)[0] == "missing":
+        return "setup", "Step 2: the Brag addon isn't in WoW yet. Click Install addon under Settings."
     if PAUSED.is_set():
         return "paused", "Posting is paused: new screenshots are skipped. Resume from the tray icon."
     failure = LAST_FAILURE  # once: the watcher thread may clear it meanwhile
     if failure:
         return "failed", f"Last post failed: {failure}"
     db, _ = load_saved(GAME_DIR)
-    if not WEBHOOK.match(db.get("webhook", "")):
-        return "setup", "No Discord webhook yet: paste it under Settings, or use /brag in WoW."
+    if not WEBHOOK.match(webhook_for(db, load_companion())):
+        return "setup", "Step 3: paste your Discord link under Settings, so Brag knows where to post."
     if not db.get("enabled", True):
         return "off", "Brag is turned off: tick Enabled under Settings, or use /brag in WoW."
-    return "ok", "Watching for screenshots."
+    return "ok", "Ready. Play WoW: your big moments get posted to Discord."
 
 
 # --- Local page ---
 
+def setup_steps(game_dir, db, cfg, done):
+    """Where the player is in the page's setup checklist: folder, addon, Discord link, played once."""
+    addon, version = addon_status(game_dir) if game_dir else ("missing", None)
+    return {
+        "folder": bool(game_dir),
+        "addon": addon, "addonVersion": version, "bundledVersion": addon_version(ADDON),
+        "canInstall": bool(game_dir) and os.path.isfile(os.path.join(ADDON, "Brag.toc")),
+        "webhook": bool(WEBHOOK.match(webhook_for(db, cfg))),
+        # WoW saves the addon's settings at the first logout; a posted screenshot also proves it
+        "played": bool(game_dir and settings_file(game_dir)) or any(e.get("kind") == "posted" for e in done.values()),
+    }
+
+
 def state(game_dir):
     kind, message = status()
+    cfg = load_companion()
     app = {"gameDir": game_dir or "", "log": list(LINES)[::-1],
            "status": {"kind": kind, "message": message}, "canChooseFolder": ON_FOLDER is not None}
     if not game_dir:
-        return {"found": False, "settings": dict(DEFAULTS), "companion": load_companion(), "shots": [], "history": [], **app}
+        return {"found": False, "settings": dict(DEFAULTS), "companion": cfg, "shots": [], "history": [],
+                "setup": setup_steps(None, {}, cfg, {}), **app}
     db, history = load_saved(game_dir)
     for h in history:
         h["text"] = CODES.sub("", str(h.get("text", "")))
@@ -576,10 +683,11 @@ def state(game_dir):
     return {
         "found": settings_file(game_dir) is not None,
         "settings": {**DEFAULTS, **{k: db[k] for k in DEFAULTS if k in db}},
-        "companion": load_companion(),
+        "companion": cfg,
         "shots": [{"name": n, "time": times[n], "status": done.get(n, {}).get("status", ""),
                    "kind": done.get(n, {}).get("kind", ""), "caption": shot_caption(n)} for n in newest],
         "history": history[::-1][:100],
+        "setup": setup_steps(game_dir, db, cfg, done),
         **app,
     }
 
@@ -634,12 +742,36 @@ class Handler(BaseHTTPRequestHandler):
             if ON_SHOW:
                 ON_SHOW()
             return self.send(200 if ON_SHOW else 404, "{}")
-        if self.path not in ("/api/settings", "/api/companion", "/api/folder"):
+        if self.path not in ("/api/settings", "/api/companion", "/api/folder", "/api/test", "/api/webhook", "/api/addon"):
             return self.send(404, "{}")
         try:
             new = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         except ValueError:
             new = None
+        if self.path == "/api/addon":  # the Install addon button: when installing on its own didn't work
+            if not GAME_DIR:
+                return self.send(400, json.dumps({"error": "Choose your WoW folder first."}))
+            try:
+                install_addon(GAME_DIR)
+            except OSError as e:
+                report_error("Couldn't install the Brag addon", e)
+                return self.send(400, json.dumps({"error": f"Couldn't copy it into {addon_dir(GAME_DIR)}: "
+                                                           f"{e.strerror or e}. Is that folder read-only?"}))
+            return self.send(200, json.dumps({"version": addon_version(addon_dir(GAME_DIR))}))
+        if self.path == "/api/webhook":  # the Discord link, kept by the app: no WoW login needed
+            webhook = new.get("webhook") if isinstance(new, dict) else None
+            webhook = webhook.strip() if isinstance(webhook, str) else None
+            if webhook is None or (webhook and not WEBHOOK.match(webhook)):
+                return self.send(400, json.dumps({"error": "That isn't a Discord webhook link. In Discord, copy it "
+                                                           "with Copy Webhook URL (see the steps below the box)."}))
+            save_companion({**load_companion(), "webhook": webhook})
+            say("Discord link saved" if webhook else "Discord link removed")
+            return self.send(200, "{}")
+        if self.path == "/api/test":  # works before the addon has saved its settings, and for an unsaved URL
+            result, error = test_webhook(new.get("webhook") if isinstance(new, dict) else None)
+            if error:
+                return self.send(400, json.dumps({"error": error}))
+            return self.send(200, json.dumps({"kind": result.kind, "reason": result.reason}))
         if self.path == "/api/folder":  # the desktop app lets the page choose the WoW folder
             if not ON_FOLDER:
                 return self.send(404, "{}")
@@ -651,6 +783,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, json.dumps({"error": error}))
             return self.send(200, json.dumps({"gameDir": GAME_DIR}))
         if self.path == "/api/companion":
+            if isinstance(new, dict):
+                new = {**load_companion(), **new}  # the Advanced form leaves out the Discord link
             error = validate_companion(new)
             if error:
                 return self.send(400, json.dumps({"error": error}))
@@ -663,7 +797,8 @@ class Handler(BaseHTTPRequestHandler):
         if not error and not GAME_DIR:
             error = "Choose your WoW folder first."
         elif not error and not path:
-            error = "Log in to WoW once with Brag installed, so its settings file exists."
+            error = ("These can be changed here once you've logged in to WoW with Brag (WoW creates its settings "
+                     "file then). Until then everything is switched on.")
         if error:
             return self.send(400, json.dumps({"error": error}))
         save_settings(path, new)

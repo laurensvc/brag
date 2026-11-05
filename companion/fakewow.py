@@ -8,8 +8,8 @@ Needs: python3 -m pip install lupa pillow
   python3 companion/watch.py DIR                    # in another terminal: the real companion
   python3 companion/fakewow.py DIR demo             # play: quest + level up, a legendary, a test post
 
-Events (any number, in order): level, quest=TITLE, loot=ITEM[:QUALITY], print (Print Screen), test (Test post
-button), demo. QUALITY is a number 0-6 or a name (default epic); add "uncached" to the loot name's quality, e.g.
+Events (any number, in order): level, quest=TITLE, loot=ITEM[:QUALITY], boss=NAME (a kill), wipe=NAME, death,
+print (Print Screen), test (Test post button), demo. QUALITY is a number 0-6 or a name (default epic); add "uncached" to the loot name's quality, e.g.
 loot=Shiny:epic-uncached, to skip the item cache. Each run is one login session: it logs out at the end.
 """
 import argparse, datetime, glob, os, sys, time
@@ -117,6 +117,14 @@ class FakeWoW:
         self.fire("CHAT_MSG_LOOT", fmt % link, self.player["name"])
         self.advance(5)
 
+    def end_encounter(self, boss, killed=True):
+        self.fire("ENCOUNTER_END", 663, boss, 9, 40, 1 if killed else 0)  # a wipe ends it with success 0
+        self.advance(5)
+
+    def die(self):
+        self.fire("PLAYER_DEAD")
+        self.advance(5)
+
     def print_screen(self):
         self._screenshot()
         self.fire("SCREENSHOT_SUCCEEDED")
@@ -185,6 +193,10 @@ def run(wow, event):
         name, _, quality = arg.rpartition(":") if ":" in arg else (arg, "", "epic")
         quality, cached = quality.removesuffix("-uncached"), not quality.endswith("-uncached")
         wow.loot(name or "Thunderfury, Blessed Blade of the Windseeker", int(quality) if quality.isdigit() else QUALITIES[quality], cached)
+    elif kind in ("boss", "wipe"):
+        wow.end_encounter(arg or "Ragnaros", killed=kind == "boss")
+    elif kind == "death":
+        wow.die()
     elif kind == "print":
         wow.print_screen()
     elif kind == "test":

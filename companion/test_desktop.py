@@ -19,13 +19,14 @@ with tempfile.TemporaryDirectory() as d:
 
     # the tray shows the companion's status: gold when all is well, red after a failure, grey otherwise
     watch.GAME_DIR = None
-    assert desktop.tray_state() == ("idle", "Brag: Choose your WoW folder to get started.")
+    assert desktop.tray_state() == ("idle", "Brag: Step 1: choose your WoW folder under Settings.")
     watch.GAME_DIR = game
+    watch.install_addon(game)
     saved = os.path.join(game, "WTF", "Account", "ME", "SavedVariables")
     os.makedirs(saved)
     with open(os.path.join(saved, "Brag.lua"), "w") as f:
         f.write('BragDB = {\n["webhook"] = "https://discord.com/api/webhooks/1/abc",\n["enabled"] = true,\n}\n')
-    assert desktop.tray_state() == ("ok", "Brag: Watching for screenshots.")
+    assert desktop.tray_state() == ("ok", "Brag: Ready. Play WoW: your big moments get posted to Discord.")
     watch.remember(watch.Result("failed", "webhook was deleted (HTTP 404) " + "x" * 200))
     color, tip = desktop.tray_state()
     assert color == "failed" and tip.startswith("Brag: Last post failed: webhook was deleted") and len(tip) == 127

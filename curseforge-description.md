@@ -3,6 +3,8 @@
 - level up
 - turn in a quest
 - loot a good item (you pick the minimum quality)
+- kill a boss
+- die (for the hall of shame)
 
 Type **/brag** to open the settings: turn each event on or off, paste your Discord webhook and send a test post.
 

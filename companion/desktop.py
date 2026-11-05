@@ -229,7 +229,8 @@ def on_result(name, result, text):
         icon.notify(f"{text or name}\n{result.reason}"[:250], "Brag couldn't post a screenshot")
     elif result == watch.NO_WEBHOOK and not warned_no_webhook:
         warned_no_webhook = True  # once per session: every screenshot would say the same
-        icon.notify("Type /brag in WoW, paste your Discord webhook, then Save & reload.", "Brag has no webhook yet")
+        icon.notify("Click the Brag icon next to the clock and paste your Discord link under Settings.",
+                    "Brag doesn't know where to post yet")
     refresh()
 
 

@@ -25,6 +25,9 @@ for size, scale, quality in [((1920, 1080), 1.0, 30), ((2560, 1440), 0.71, 30), 
         wow.loot("Krol Blade", 4, cached=False)  # not in the item cache: quality from the link color
         wow.loot("Linen Cloth", 1)  # below the minimum quality: nothing
         wow.loot("Lucky Charm", 4, pushed=True)  # "You receive item:" (quest rewards, mail)
+        wow.end_encounter("Ragnaros", killed=False)  # a wipe: nothing
+        wow.end_encounter("Ragnaros")
+        wow.die()
         wow.print_screen()  # the player's own screenshot: no strip
         assert captions(wow) == [
             "📜 Jaïna completed The \"Missing\" Diplomat part 1 · Level 41 Shaman · Theramore Isle",
@@ -32,6 +35,8 @@ for size, scale, quality in [((1920, 1080), 1.0, 30), ((2560, 1440), 0.71, 30), 
             "💎 Jaïna looted [Thunderfury, Blessed Blade of the Windseeker] (Legendary) · Level 42 Shaman · Theramore Isle",
             "💎 Jaïna looted [Krol Blade] (Epic) · Level 42 Shaman · Theramore Isle",
             "💎 Jaïna looted [Lucky Charm] (Epic) · Level 42 Shaman · Theramore Isle",
+            "⚔️ Jaïna defeated Ragnaros! · Level 42 Shaman · Theramore Isle",
+            "💀 Jaïna died · Level 42 Shaman · Theramore Isle",
             "",
         ], (size, scale, captions(wow))
 
@@ -77,8 +82,31 @@ with tempfile.TemporaryDirectory() as d:
     wow.level_up()
     assert len(wow.taken) == before
 
+    # each event has its own switch: deaths and boss kills too
+    wow.lua.globals().BragDB.enabled = True
+    wow.lua.globals().BragDB.death = False
+    wow.lua.globals().BragDB.boss = False
+    wow.die()
+    wow.end_encounter("Onyxia")
+    assert len(wow.taken) == before
+    wow.lua.globals().BragDB.death = True
+    wow.die()
+    assert len(wow.taken) == before + 1 and wow.lua.globals().BragHistory[3].text == "Died in Orgrimmar"
+
+with tempfile.TemporaryDirectory() as d:
+    # an addon from before deaths and boss kills: its saved settings get them, switched on
+    os.makedirs(os.path.join(d, "WTF", "Account", "FAKEWOW", "SavedVariables"))
+    with open(os.path.join(d, "WTF", "Account", "FAKEWOW", "SavedVariables", "Brag.lua"), "w") as f:
+        f.write('BragDB = {\n["enabled"] = true,\n["loot"] = false,\n["webhook"] = "",\n}\n')
+    wow = FakeWoW(d)
+    assert wow.db["boss"] is True and wow.db["death"] is True and wow.db["loot"] is False
+    # and the /brag panel has the switches
+    wow.slash()
+    assert wow.lua.globals().MOCK_find("FontString", "Boss kills") and wow.lua.globals().MOCK_find("FontString", "Deaths")
+
 # a new character with no SavedVariables yet gets the defaults
 with tempfile.TemporaryDirectory() as d:
-    assert FakeWoW(d).db == {"enabled": True, "level": True, "quest": True, "loot": True, "minQuality": 4, "webhook": ""}
+    assert FakeWoW(d).db == {"enabled": True, "level": True, "quest": True, "loot": True, "boss": True, "death": True,
+                             "minQuality": 4, "webhook": ""}
 
 print("ok")

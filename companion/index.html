@@ -34,12 +34,12 @@
   #notice { font: 700 15px/1.3 var(--title); color: var(--gold-soft); text-shadow: 0 1px 2px #000; }
   #notice.failed, #notice.off { color: var(--bad); text-shadow: 0 0 10px rgba(255, 60, 20, .5), 0 1px 0 #000; }
   main { padding: 20px 24px 24px; max-width: 1440px; margin: 0 auto; }
-  .panel.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 0 24px; align-items: start; }
+  .panel.settings { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 0 24px; align-items: start; }
   .panel.screenshots { display: grid; grid-template-columns: 1fr 340px; gap: 24px; align-items: start; }
   .panel.log { max-width: 1100px; }
   @media (max-width: 820px) {
     main { padding: 16px; } header { padding: 12px 16px 20px; } #tabs { padding: 12px 16px 0; }
-    .panel.screenshots { grid-template-columns: 1fr; }
+    .panel.screenshots, .panel.settings { grid-template-columns: 1fr; }
   }
 
   /* Tabs: gold-trimmed plates, the active one lit */
@@ -89,12 +89,47 @@
   }
   button:hover { filter: brightness(1.18); }
   button:active { filter: brightness(.8); transform: scale(.97); }
+  button:disabled { filter: grayscale(.7) brightness(.75); cursor: default; transform: none; }
+  .buttons { display: flex; flex-wrap: wrap; column-gap: 8px; }
+  .buttons button { min-width: 118px; padding: 10px 22px; }
   :focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
   .hint { font-size: 14px; color: var(--muted); margin: 12px 0 0; }
-  #msg, #cmsg, #fmsg { font-size: 15px; margin: 12px 0 0; }
-  #msg:empty, #cmsg:empty, #fmsg:empty { display: none; }
-  #folder button { min-width: 118px; padding: 10px 22px; }  /* Browse… and Save side by side in a narrow card */
-  #folder button + button { margin-left: 8px; }
+  .hint:empty, .msg:empty, .path:empty { display: none; }
+  .msg { font-size: 15px; margin: 12px 0 0; }
+
+  /* Setup: numbered steps that turn into green ticks; the next step to do is lit */
+  .steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+  .steps > li { counter-increment: step; padding: 14px 0 16px; border-top: 1px solid var(--line); }
+  .steps > li:first-child { border-top: 0; padding-top: 0; }
+  .steps h3 { display: flex; align-items: center; gap: 12px; margin: 0; font: 700 17px/1.2 var(--title); letter-spacing: .04em; color: var(--muted); }
+  .steps .tick {
+    flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+    font: 700 15px/1 var(--title); color: var(--muted); border: 2px solid rgba(185, 164, 124, .5); background: rgba(0, 0, 0, .45);
+  }
+  .steps .tick::before { content: counter(step); }
+  .steps li.current h3 { color: var(--gold); text-shadow: 0 0 10px rgba(255, 170, 0, .35); }
+  .steps li.current .tick { color: var(--gold); border-color: var(--gold); box-shadow: 0 0 10px rgba(255, 170, 0, .4); }
+  .steps li.done h3 { color: var(--text); }
+  .steps li.done .tick { color: #0d0a07; border-color: var(--ok); background: var(--ok); }
+  .steps li.done .tick::before { content: "✓"; }
+  .steps > li > :not(h3) { margin-left: 42px; }
+  /* finished steps fold down to a one-line summary (.sum), with a Change link to open them again */
+  .steps li.done:not(.open) > :not(h3):not(.msg):not(.sum) { display: none; }
+  .edit { display: none !important; }
+  .steps li.done:not(.open) .edit { display: inline !important; }
+  .how { margin: 8px 0 0; padding-left: 20px; font-size: 15px; }
+  .how li { padding: 2px 0; }
+  .steps input { margin-top: 12px; }
+  .path { margin: 10px 0 0; font-size: 15px; overflow-wrap: anywhere; }
+  button.link {
+    margin: 0 0 0 10px; min-width: 0; min-height: 0; padding: 0; background: none; color: var(--gold-soft);
+    font: 700 13px/1 var(--title); text-decoration: underline; text-shadow: none;
+  }
+  summary { cursor: pointer; list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary h2::after { content: " ▸"; }
+  details[open] summary h2::after { content: " ▾"; }
+  details:not([open]) summary h2 { margin-bottom: 0; }
 
   /* Screenshots: gold-trimmed frames */
   #shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 18px; }
@@ -142,41 +177,75 @@
 </nav>
 <main>
   <div class="panel settings" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
-    <section class="card" id="folder" hidden>
-      <h2>WoW folder</h2>
-      <form id="folderForm">
-        <label class="field"><span>The _forever_ folder in your WoW install</span>
-          <input type="text" id="gameDirInput" placeholder="C:\Program Files (x86)\World of Warcraft\_forever_" autocomplete="off" spellcheck="false">
-        </label>
-        <button type="button" id="browse" hidden>Browse…</button>
-        <button type="submit">Save</button>
-        <p id="fmsg" role="status"></p>
-      </form>
+    <section class="card" id="setup">
+      <h2>Setup</h2>
+      <ol class="steps">
+        <li id="step-folder">
+          <h3><span class="tick"></span>Find your WoW folder<button type="button" class="link edit">Change</button></h3>
+          <p class="hint">The <b>_forever_</b> folder inside your World of Warcraft install. Brag looks for it on its own; if it couldn't, pick it here.</p>
+          <form id="folderForm" hidden>
+            <input type="text" id="gameDirInput" aria-label="WoW folder" placeholder="C:\Program Files (x86)\World of Warcraft\_forever_" autocomplete="off" spellcheck="false">
+            <div class="buttons">
+              <button type="button" id="browse" hidden>Browse…</button>
+              <button type="submit">Save</button>
+            </div>
+          </form>
+          <p class="path sum" id="folderPath"></p>
+          <p class="msg" id="fmsg" role="status"></p>
+        </li>
+        <li id="step-addon">
+          <h3><span class="tick"></span>Install the Brag addon</h3>
+          <p class="hint sum" id="addonText"></p>
+          <div class="buttons"><button type="button" id="installAddon" hidden>Install addon</button></div>
+          <p class="msg" id="amsg" role="status"></p>
+        </li>
+        <li id="step-webhook">
+          <h3><span class="tick"></span>Connect Discord<button type="button" class="link edit">Change</button></h3>
+          <p class="hint sum" id="webhookText"></p>
+          <p class="hint">Brag posts to a Discord channel through a link that Discord makes for you. Get it like this:</p>
+          <ol class="how">
+            <li>In Discord, right-click your server and pick <b>Server Settings</b>, then <b>Integrations</b>.</li>
+            <li>Click <b>Webhooks</b>, then <b>New Webhook</b>, and choose the channel to post in.</li>
+            <li>Click <b>Copy Webhook URL</b> and paste it below.</li>
+          </ol>
+          <form id="webhookForm">
+            <input type="url" id="webhook" aria-label="Discord link" placeholder="Paste the link here: https://discord.com/api/webhooks/…" autocomplete="off" spellcheck="false">
+            <div class="buttons">
+              <button type="submit">Save</button>
+              <button type="button" id="testHook">Send test message</button>
+            </div>
+          </form>
+          <p class="msg" id="wmsg" role="status"></p>
+        </li>
+        <li id="step-play">
+          <h3><span class="tick"></span>Play!</h3>
+          <p class="hint sum" id="playText"></p>
+        </li>
+      </ol>
     </section>
+    <div>
     <section class="card">
-      <h2>In game</h2>
+      <h2>What to post</h2>
       <form id="settings">
-        <label class="row"><input type="checkbox" id="enabled"> Enabled</label>
+        <label class="row"><input type="checkbox" id="enabled"> Brag is on</label>
         <label class="row"><input type="checkbox" id="level"> Level ups</label>
-        <label class="row"><input type="checkbox" id="quest"> Quest turn-ins</label>
-        <label class="row"><input type="checkbox" id="loot"> Loot</label>
-        <label class="field"><span>Minimum loot quality</span>
+        <label class="row"><input type="checkbox" id="quest"> Quests you finish</label>
+        <label class="row"><input type="checkbox" id="loot"> Good loot</label>
+        <label class="row"><input type="checkbox" id="boss"> Boss kills</label>
+        <label class="row"><input type="checkbox" id="death"> Deaths</label>
+        <label class="field"><span>Only loot this good or better</span>
           <select id="minQuality">
-            <option value="2">Uncommon</option><option value="3">Rare</option>
-            <option value="4">Epic</option><option value="5">Legendary</option>
+            <option value="2">Uncommon (green)</option><option value="3">Rare (blue)</option>
+            <option value="4">Epic (purple)</option><option value="5">Legendary (orange)</option>
           </select>
         </label>
-        <label class="field"><span>Discord webhook URL</span>
-          <input type="url" id="webhook" placeholder="https://discord.com/api/webhooks/…" autocomplete="off">
-        </label>
-        <p class="hint">Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy URL.</p>
         <button type="submit">Save</button>
-        <p id="msg" role="status"></p>
-        <p class="hint">Close WoW before saving here: WoW overwrites these settings with its in-game ones when you log out.</p>
+        <p class="msg" id="msg" role="status"></p>
+        <p class="hint" id="settingsHint"></p>
       </form>
     </section>
-    <section class="card">
-      <h2>Posting</h2>
+    <details class="card" id="advanced">
+      <summary><h2>Advanced</h2></summary>
       <form id="companion">
         <label class="row"><input type="checkbox" id="caption"> Add a caption (who, what, where)</label>
         <label class="field"><span>Retries when Discord or the network fails</span>
@@ -204,10 +273,11 @@
         <label class="row"><input type="checkbox" id="deleteShots"> Also delete older screenshots</label>
         <p class="hint">Deletes every screenshot in your Screenshots folder older than that, including ones you took yourself. Can't be undone.</p>
         <button type="submit">Save</button>
-        <p id="cmsg" role="status"></p>
+        <p class="msg" id="cmsg" role="status"></p>
         <p class="hint">These apply right away, even while WoW is running.</p>
       </form>
-    </section>
+    </details>
+    </div>
   </div>
   <div class="panel screenshots" id="panel-screenshots" role="tabpanel" aria-labelledby="tab-screenshots" hidden>
     <section>
@@ -231,7 +301,7 @@
 </main>
 <script>
   const $ = s => document.querySelector(s);
-  const TOGGLES = ["enabled", "level", "quest", "loot"];
+  const TOGGLES = ["enabled", "level", "quest", "loot", "boss", "death"];
   const COMPANION_TOGGLES = ["caption", "deleteShots"];
   const COMPANION_NUMBERS = ["retries", "maxHeight", "jpegQuality", "keepDays"];
   let deleteWasOn = false;
@@ -253,10 +323,54 @@
     return p;
   }
 
+  function setMsg(id, kind, text) {
+    $(id).className = "msg " + (kind || "");
+    $(id).textContent = text;
+  }
+  const UNREACHABLE = "Can't reach Brag. Is it still running? (Look for its icon next to the clock.)";
+
+  // The Setup checklist: each step ticks itself off; the first one still to do is lit
+  const STEPS = ["folder", "addon", "webhook", "play"];
+  const stepsDone = s => ({ folder: s.folder, addon: s.folder && s.addon !== "missing", webhook: s.webhook, play: s.played });
+  function renderSetup(st) {
+    const s = st.setup, done = stepsDone(s);
+    const current = STEPS.find(k => !done[k]);
+    for (const k of STEPS) {
+      $("#step-" + k).classList.toggle("done", !!done[k]);
+      $("#step-" + k).classList.toggle("current", k === current);
+    }
+    $("#folderForm").hidden = !st.canChooseFolder;  // only the Windows app can change it
+    $("#folderPath").textContent = st.gameDir ||
+      (st.canChooseFolder ? "" : "Not set: start the companion with your _forever_ folder.");
+
+    const install = $("#installAddon");
+    install.hidden = !s.canInstall || s.addon === "ok";
+    install.textContent = s.addon === "outdated" ? "Update addon" : "Install addon";
+    $("#addonText").textContent =
+      !s.folder ? "Brag puts its addon into WoW for you, once it knows your WoW folder." :
+      s.addon === "ok" ? `Installed (version ${s.addonVersion}). In WoW, make sure Brag is ticked under AddOns on the character screen.` :
+      s.addon === "outdated" ? `Version ${s.addonVersion} is installed; this Brag has ${s.bundledVersion}. Click Update addon, then type /reload in WoW.` :
+      s.canInstall ? "Not installed yet. Brag usually does this on its own; click Install addon to try again." :
+      "Not installed yet: copy the Brag folder from the download into Interface\\AddOns in your WoW folder.";
+
+    $("#webhookText").textContent = done.webhook ? "Connected: Brag posts to your Discord channel." : "";
+    $("#playText").textContent = done.play
+      ? "Brag has seen you in WoW. You're all set: keep this app running while you play (it waits next to the clock)."
+      : "Log in to WoW. Brag takes a screenshot when you level up, finish a quest, loot something good, kill a boss " +
+        "or die, and posts it to Discord within seconds. To try it now, type /brag in the WoW chat and click Test post.";
+  }
+  for (const b of document.querySelectorAll(".edit")) {
+    b.addEventListener("click", () => b.closest("li").classList.add("open"));
+  }
+
   function render(st) {
     $("#notice").textContent = st.status.kind === "ok" ? "" : st.status.message;  // the tray shows the same
     $("#notice").className = st.status.kind;
-    $("#folder").hidden = !st.canChooseFolder;  // only the Windows app can change it
+    renderSetup(st);
+    $("#settings button[type=submit]").disabled = !st.found;
+    $("#settingsHint").textContent = st.found
+      ? "Close WoW before saving here: WoW puts back its own settings when you log out. Or change them in WoW with /brag."
+      : "You can change these here after your first login to WoW with Brag. Until then everything is switched on.";
 
     const log = $("#log");
     log.replaceChildren();
@@ -296,15 +410,16 @@
     if (first) {
       for (const k of TOGGLES) $("#" + k).checked = st.settings[k];
       $("#minQuality").value = st.settings.minQuality;
-      $("#webhook").value = st.settings.webhook;
+      $("#webhook").value = st.companion.webhook || st.settings.webhook;  // the app's link, else the one from /brag
       for (const k of COMPANION_TOGGLES) $("#" + k).checked = st.companion[k];
       for (const k of COMPANION_NUMBERS) $("#" + k).value = st.companion[k];
       deleteWasOn = st.companion.deleteShots;
       $("#gameDirInput").value = st.gameDir;
-      if (!tabChosen && !(st.gameDir && st.found && st.settings.webhook)) showTab("settings");
+      const done = stepsDone(st.setup);
+      if (!tabChosen && !(done.folder && done.addon && done.webhook)) showTab("settings");
       if (!st.gameDir && st.canChooseFolder) askForFolder();
     }
-    const key = JSON.stringify([st.status, st.gameDir, st.shots, st.history, st.log]);
+    const key = JSON.stringify([st.status, st.gameDir, st.setup, st.found, st.shots, st.history, st.log]);
     if (key !== last) { last = key; render(st); }  // only re-render when something changed, so images don't flicker
   }
 
@@ -312,16 +427,61 @@
     ev.preventDefault();
     const body = Object.fromEntries(TOGGLES.map(k => [k, $("#" + k).checked]));
     body.minQuality = Number($("#minQuality").value);
-    body.webhook = $("#webhook").value.trim();
-    const msg = $("#msg");
     try {
       const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const ok = r.ok;
-      msg.className = ok ? "posted" : "failed";
-      msg.textContent = ok ? "Saved. WoW uses it the next time you log in." : (await r.json()).error;
+      setMsg("#msg", r.ok ? "posted" : "failed", r.ok ? "Saved. WoW uses it the next time you log in." : (await r.json()).error);
     } catch {
-      msg.className = "failed";
-      msg.textContent = "Can't reach the Brag companion. Is it still running?";
+      setMsg("#msg", "failed", UNREACHABLE);
+    }
+  });
+
+  function refresh() { last = ""; load(false).catch(() => {}); }  // re-render now, so the ticks catch up
+
+  // Step 3: the Discord link is kept by the app, so it works without logging in to WoW first
+  $("#webhookForm").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    try {
+      const r = await fetch("/api/webhook", { method: "POST", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ webhook: $("#webhook").value }) });
+      setMsg("#wmsg", r.ok ? "posted" : "failed", r.ok
+        ? ($("#webhook").value.trim() ? "Saved. Click Send test message to check it." : "Removed.") : (await r.json()).error);
+      if (r.ok) { $("#step-webhook").classList.remove("open"); refresh(); }
+    } catch {
+      setMsg("#wmsg", "failed", UNREACHABLE);
+    }
+  });
+
+  // Posts a test message to the link in the box, saved or not
+  $("#testHook").addEventListener("click", async () => {
+    const button = $("#testHook");
+    button.disabled = true;
+    setMsg("#wmsg", "", "Sending a test message…");
+    try {
+      const r = await fetch("/api/test", { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify({ webhook: $("#webhook").value }) });
+      const res = await r.json();
+      setMsg("#wmsg", res.kind === "posted" ? "posted" : "failed", !r.ok ? res.error : res.kind === "posted"
+        ? "Sent! Look in your Discord channel for the test message." : `That didn't work: ${res.reason}. Copy the link from Discord again and paste it here.`);
+    } catch {
+      setMsg("#wmsg", "failed", UNREACHABLE);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  // Step 2: Brag installs the addon on its own; this button is for when that didn't work, or to update it
+  $("#installAddon").addEventListener("click", async () => {
+    const button = $("#installAddon");
+    button.disabled = true;
+    try {
+      const r = await fetch("/api/addon", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const res = await r.json();
+      setMsg("#amsg", r.ok ? "posted" : "failed", r.ok ? "Installed. If WoW is running, type /reload in the chat to load it." : res.error);
+      refresh();
+    } catch {
+      setMsg("#amsg", "failed", UNREACHABLE);
+    } finally {
+      button.disabled = false;
     }
   });
 
@@ -331,25 +491,27 @@
     for (const k of COMPANION_NUMBERS) body[k] = Number($("#" + k).value);
     if (body.deleteShots && !deleteWasOn &&
         !confirm(`Delete every screenshot older than ${body.keepDays} days from your Screenshots folder, now and from now on?`)) return;
-    const msg = $("#cmsg");
     try {
       const r = await fetch("/api/companion", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const res = await r.json();
-      msg.className = r.ok ? "posted" : "failed";
-      msg.textContent = !r.ok ? res.error : "Saved." + (res.removed ? ` Deleted ${res.removed} old screenshot${res.removed === 1 ? "" : "s"}.` : "");
+      setMsg("#cmsg", r.ok ? "posted" : "failed",
+        !r.ok ? res.error : "Saved." + (res.removed ? ` Deleted ${res.removed} old screenshot${res.removed === 1 ? "" : "s"}.` : ""));
       if (r.ok) { deleteWasOn = body.deleteShots; load(false).catch(() => {}); }
     } catch {
-      msg.className = "failed";
-      msg.textContent = "Can't reach the Brag companion. Is it still running?";
+      setMsg("#cmsg", "failed", UNREACHABLE);
     }
   });
 
-  // The WoW folder (Windows app only): type or paste it, or Browse… inside the app window
+  // Step 1, the WoW folder (Windows app only): type or paste it, or Browse… inside the app window
   function folderResult(res) {
-    const msg = $("#fmsg");
-    msg.className = res.error ? "failed" : "posted";
-    msg.textContent = res.error || "Saved. Brag watches this folder now.";
-    if (res.gameDir) { last = ""; load(true).catch(() => {}); }  // new folder: new settings and screenshots
+    setMsg("#fmsg", res.error ? "failed" : "posted", res.error || "Saved. Brag watches this folder now.");
+    if (res.gameDir) {  // new folder: new settings and screenshots
+      $("#step-folder").classList.remove("open");
+      last = "";
+      // the watcher installs the addon on its first look at the folder: check again shortly for the tick
+      load(true).catch(() => {});
+      setTimeout(refresh, 2500);
+    }
   }
   window.addEventListener("pywebviewready", () => { $("#browse").hidden = false; });
 
@@ -378,7 +540,7 @@
                                              body: JSON.stringify({ path: $("#gameDirInput").value.trim() }) });
       folderResult(await r.json());
     } catch {
-      folderResult({ error: "Can't reach the Brag companion. Is it still running?" });
+      folderResult({ error: UNREACHABLE });
     }
   });
 
@@ -409,7 +571,7 @@
   });
   showTab(tabChosen ? fromHash : "screenshots");
 
-  load(true).catch(() => { $("#notice").textContent = "Can't reach the Brag companion. Is it still running?"; });
+  load(true).catch(() => { $("#notice").textContent = UNREACHABLE; });
   setInterval(() => load(false).catch(() => {}), 5000);
 </script>
 </body>

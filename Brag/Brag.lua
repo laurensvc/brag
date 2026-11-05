@@ -1,7 +1,9 @@
 -- WoW addons can't touch the network, so we only show a banner and take a screenshot.
 -- The companion script posts the screenshot, using the webhook saved here in BragDB.
 local ADDON = ...
-local DEFAULTS = { enabled = true, level = true, quest = true, loot = true, minQuality = 4, webhook = "" }
+local DEFAULTS = {
+  enabled = true, level = true, quest = true, loot = true, boss = true, death = true, minQuality = 4, webhook = "",
+}
 local QUALITY_NAMES = { [2] = "Uncommon", [3] = "Rare", [4] = "Epic", [5] = "Legendary" }
 local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo -- newer clients drop the global
 local db
@@ -79,7 +81,7 @@ local function nextShot()
   end)
 end
 
--- kind: level | quest | loot | test. detail: quest title or item name.
+-- kind: level | quest | loot | boss | death | test. detail: quest title, item name or boss name.
 local function brag(kind, text, detail, quality, level)
   tinsert(BragHistory, { time = time(), text = text }) -- the companion app shows this history
   if #BragHistory > 500 then tremove(BragHistory, 1) end -- keep the saved file small
@@ -109,9 +111,11 @@ f:RegisterEvent("PLAYER_LEVEL_UP")
 f:RegisterEvent("QUEST_COMPLETE")
 f:RegisterEvent("QUEST_TURNED_IN")
 f:RegisterEvent("CHAT_MSG_LOOT")
+f:RegisterEvent("ENCOUNTER_END")
+f:RegisterEvent("PLAYER_DEAD")
 f:RegisterEvent("SCREENSHOT_SUCCEEDED")
 f:RegisterEvent("SCREENSHOT_FAILED")
-f:SetScript("OnEvent", function(_, event, arg1)
+f:SetScript("OnEvent", function(_, event, arg1, arg2, _, _, arg5)
   if event == "ADDON_LOADED" and arg1 == ADDON then
     BragDB = BragDB or {}
     BragHistory = BragHistory or {}
@@ -141,6 +145,10 @@ f:SetScript("OnEvent", function(_, event, arg1)
         return
       end
     end
+  elseif event == "ENCOUNTER_END" and db.boss and arg5 == 1 then -- encounterID, name, difficulty, size, success
+    brag("boss", "Boss defeated: " .. (arg2 or "?"), arg2 or "?")
+  elseif event == "PLAYER_DEAD" and db.death then
+    brag("death", "Died in " .. GetRealZoneText(), nil)
   end
 end)
 
@@ -148,7 +156,7 @@ end)
 local panel
 local function buildPanel()
   local p = CreateFrame("Frame", "BragPanel", UIParent, "BasicFrameTemplateWithInset")
-  p:SetSize(380, 310)
+  p:SetSize(380, 366)
   p:SetPoint("CENTER")
   p:SetMovable(true)
   p:EnableMouse(true)
@@ -178,6 +186,8 @@ local function buildPanel()
   checkbox("Level ups", "level")
   checkbox("Quest turn-ins", "quest")
   local loot = checkbox("Loot", "loot")
+  checkbox("Boss kills", "boss")
+  checkbox("Deaths", "death")
 
   local q = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
   q:SetSize(170, 22)
@@ -208,7 +218,7 @@ local function buildPanel()
   e:SetText(db.webhook)
   e:SetCursorPosition(0)
   local hint = text(p, "GameFontDisableSmall",
-    "In Discord: Server Settings > Integrations > Webhooks > New Webhook > Copy URL, then paste here (Ctrl+V).\nThe companion sees changes after Save & reload. Captions, retries and image size are on the companion page.")
+    "Easier: paste it in the Brag app instead (its link wins). Here: Discord Server Settings > Integrations > Webhooks > New Webhook > Copy URL, then Ctrl+V.\nThe app sees changes here after Save & reload.")
   hint:SetPoint("TOPLEFT", 20, y - 68)
   hint:SetWidth(340)
   hint:SetJustifyH("LEFT")

@@ -3,58 +3,65 @@
 WoW addons are sandboxed: they can't make network calls, and they only write files when you log out.
 So there are two parts:
 
-1. **Brag** (the addon) shows a banner and takes a screenshot when you level up, turn in a quest, or loot an epic+ item.
+1. **Brag** (the addon) shows a banner and takes a screenshot when you level up, turn in a quest, loot an epic+ item,
+   kill a boss or die (each one can be switched off).
 2. **The companion** watches your Screenshots folder and uploads every new screenshot to a Discord webhook,
    with a caption like "💎 **Thrall** looted **[Thunderfury]** (Legendary) · Level 60 Shaman · Molten Core".
    On Windows it's a small tray app (**BragSetup.exe**); on Mac and Linux, the `companion/watch.py` script.
 
 ## Setup
-1. Download `Brag-<version>.zip` from the [latest release](https://github.com/laurensvc/brag/releases/latest) (or CurseForge)
-   and unzip it into `<WoW install>/_forever_/Interface/AddOns/`, so you get `AddOns/Brag/Brag.toc`.
-   Using GitHub's "Download ZIP" instead? Copy only the `Brag` folder inside `brag-main`: WoW ignores an addon
-   whose folder name doesn't match its `.toc` file ("Folder brag-main must contain a file named brag-main.toc").
-2. Check the interface number in game with `/dump select(4, GetBuildInfo())` and put it in `Brag.toc`,
-   or tick "Load out of date AddOns".
-3. Start the companion.
+### Windows: the easy way
+1. Download **[BragSetup.exe](https://github.com/laurensvc/brag/releases/latest/download/BragSetup.exe)** and run it.
+   No admin needed. Windows may warn about an unknown publisher: click **More info**, then **Run anyway**.
+2. Brag opens with a **Setup** checklist that ticks itself off:
+   1. **Find your WoW folder**: Brag looks for it itself, or asks you for the `_forever_` folder.
+   2. **Install the Brag addon**: Brag copies its addon into WoW for you, and updates it when Brag updates.
+   3. **Connect Discord**: paste the link Discord gives you (the page shows where to find it), then click
+      **Send test message** to check it.
+   4. **Play!** Brag waits in the tray next to the clock and posts while you play.
 
-   **Windows:** download **BragSetup.exe** from the [latest release](https://github.com/laurensvc/brag/releases/latest/download/BragSetup.exe)
-   and run it (no admin needed; Windows may warn about an unknown publisher: More info → Run anyway). Brag finds
-   your WoW folder itself, or asks you for the `_forever_` folder, and then sits in the tray next to the clock:
-   - click the icon to open the Brag window (settings, screenshots, history and a log of every post);
-   - closing the window keeps Brag running in the tray; right-click → **Quit** stops it;
-   - right-click also has **Pause posting**, **Open Screenshots folder** and **Start with Windows**;
-   - the icon is gold while it works, grey when paused or not set up yet (hover it to see why), and red with a
-     Windows notification when a post fails.
+That's all. More about the tray app:
+- click the icon to open the Brag window (setup, screenshots, history and a log of every post);
+- closing the window keeps Brag running in the tray; right-click → **Quit** stops it;
+- right-click also has **Pause posting**, **Open Screenshots folder** and **Start with Windows**;
+- the icon is gold while it works, grey when paused or not set up yet (hover it to see why), and red with a
+  Windows notification when a post fails.
 
-   Its settings and log live in `%APPDATA%\Brag`. Used the command-line companion before? Run
-   `Brag.exe --import "<the companion folder>"` once to bring over its posting settings and post history.
+Its settings and log live in `%APPDATA%\Brag`. Used the command-line companion before? Run
+`Brag.exe --import "<the companion folder>"` once to bring over its posting settings and post history.
 
-   The window uses Microsoft Edge WebView2, which Windows 11 and up-to-date Windows 10 already have. Without it,
-   Brag says so once and shows its page in your browser instead (the tray works the same; type or paste your
-   WoW folder under Settings). Install [WebView2](https://go.microsoft.com/fwlink/p/?LinkId=2124703) and restart
-   Brag to get the window back. `Brag.exe --browser` always uses the browser.
+The window uses Microsoft Edge WebView2, which Windows 11 and up-to-date Windows 10 already have. Without it,
+Brag says so once and shows its page in your browser instead (the tray works the same; type or paste your
+WoW folder under Settings). Install [WebView2](https://go.microsoft.com/fwlink/p/?LinkId=2124703) and restart
+Brag to get the window back. `Brag.exe --browser` always uses the browser.
 
-   **Mac/Linux (or Windows without the app):** run the script. It needs Python 3 and Pillow (curl ships with
-   macOS and Windows 10+). Point it at your Forever game folder, the one that holds `Screenshots` and `WTF`:
+### Mac and Linux (or Windows without the app)
+1. Run the companion script. It needs Python 3 and Pillow (curl ships with macOS and Windows 10+). Point it at
+   your Forever game folder, the one that holds `Screenshots` and `WTF`:
    ```
    python3 -m pip install pillow
    python3 companion/watch.py "<WoW install>/_forever_"
    ```
    On Windows: `py -m pip install pillow`, then `py companion\watch.py "C:\...\_forever_"`
 
-   It opens **http://127.0.0.1:8765** in your browser (the Windows app shows the same page in its window), where you can change settings, browse past
-   screenshots (with what happened and whether they were posted) and see your Brag history. WoW doesn't need to be running.
-4. Set your Discord webhook (Discord: Server Settings → Integrations → Webhooks → New Webhook → Copy URL),
-   either on that page or in game with `/brag` → **Save & reload**.
-5. Click **Test post** in `/brag` to check it all works. Keep the companion running while you play.
+   It installs the addon from this repo's `Brag` folder into WoW if it isn't there yet, and opens
+   **http://127.0.0.1:8765**: the same page and Setup checklist as the Windows app. WoW doesn't need to be running.
+2. Paste your Discord link under **Connect Discord** and click **Send test message**.
+
+Installing the addon yourself (CurseForge, or `Brag-<version>.zip` from the
+[latest release](https://github.com/laurensvc/brag/releases/latest)) works too: unzip it into
+`<WoW install>/_forever_/Interface/AddOns/`, so you get `AddOns/Brag/Brag.toc`. Using GitHub's "Download ZIP"?
+Copy only the `Brag` folder inside `brag-main`: WoW ignores an addon whose folder name doesn't match its `.toc`
+file. If WoW calls the addon out of date, tick "Load out of date AddOns" on the character screen.
 
 Good to know:
-- WoW only reads and writes addon settings at login/logout. Change settings on the page while WoW is closed,
-  or in game with `/brag`; otherwise WoW overwrites the page's changes when you log out.
+- The Discord link you paste on the page is kept by Brag and wins over one typed in game with `/brag`.
+- WoW only reads and writes addon settings (what to post) at login/logout. Change those on the page while WoW
+  is closed, or in game with `/brag`; otherwise WoW overwrites the page's changes when you log out.
 - In-game events reach the page's history after you log out or `/reload`; screenshots and post status show up live.
 - Screenshots you take yourself (Print Screen) also get posted, unless Brag is disabled.
 - The page only listens on your own computer (127.0.0.1) and rejects requests from other websites.
-- The **Posting** settings on the page (caption, retries, max image size, JPEG quality, how many days of post
+- The **Advanced** settings on the page (caption, retries, max image size, JPEG quality, how many days of post
   history to keep, and optionally deleting older screenshots) belong to the companion and apply right away.
 
 ## How captions work
@@ -73,7 +80,7 @@ python3 -m pip install lupa pillow
 python3 companion/fakewow.py fake-wow --webhook "https://discord.com/api/webhooks/..."   # /brag: paste, Save & reload
 python3 companion/watch.py fake-wow                                                     # in a second terminal
 python3 companion/fakewow.py fake-wow demo        # quest turn-in that levels up, a legendary, a Test post
-python3 companion/fakewow.py fake-wow level "quest=Bounty on Murlocs" "loot=Krol Blade:epic" print
+python3 companion/fakewow.py fake-wow level "quest=Bounty on Murlocs" "loot=Krol Blade:epic" boss=Onyxia death print
 ```
 Options: `--size 2560x1440`, `--ui-scale 0.71`, `--name`, `--zone`; `python3 companion/fakewow.py --help` lists the events.
 The mock only knows the API calls Brag makes and draws an idealized frame, so check real rendering in game.
