@@ -8,6 +8,14 @@ with tempfile.TemporaryDirectory() as d:
     assert desktop.find_game_dir(game) == game
     assert desktop.find_game_dir(os.path.dirname(game)) == game  # the install folder works too
     assert desktop.find_game_dir(d) is None
+    # the folder the player typed or picked
+    assert desktop.use_folder(d) == desktop.NOT_WOW and desktop.use_folder(os.path.join(d, "nope")) == desktop.NOT_WOW
+    real_set, set_to = desktop.set_game_dir, []
+    desktop.set_game_dir = set_to.append
+    try:
+        assert desktop.use_folder(os.path.dirname(game)) is None and set_to == [game]
+    finally:
+        desktop.set_game_dir = real_set
 
     # the tray shows the companion's status: gold when all is well, red after a failure, grey otherwise
     watch.GAME_DIR = None
@@ -39,5 +47,19 @@ desktop.second_launch(False, lambda: asked.append(1) or True, told.append)
 assert asked == [1] and told == []
 desktop.second_launch(False, lambda: False, told.append)  # the running Brag didn't answer
 assert told and "already running" in told[0]
+
+assert desktop.webview2_installed() in (True, False)  # reads the registry; Windows 11 always has it
+
+# without WebView2 the player is told once per PC, not on every start
+with tempfile.TemporaryDirectory() as d:
+    real = desktop.APP_CONFIG, desktop.message
+    told = []
+    desktop.APP_CONFIG, desktop.message = os.path.join(d, "brag-app.json"), lambda text, icon=0: told.append(text)
+    try:
+        desktop.warn_no_webview2()
+        desktop.warn_no_webview2()
+        assert len(told) == 1 and "WebView2" in told[0] and desktop.load_app()["webview2Warned"] is True
+    finally:
+        desktop.APP_CONFIG, desktop.message = real
 
 print("ok")

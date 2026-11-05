@@ -67,7 +67,7 @@
   input[type=checkbox]:checked { background-image: url("/assets/checkbox-default-checked.webp"); }
   .field { display: block; margin-top: 14px; }
   .field span { display: block; font: 700 12px/1.3 var(--title); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
-  select, input[type=url], input[type=number] {
+  select, input[type=url], input[type=number], input[type=text] {
     width: 100%; color: var(--text); font: inherit; padding: 6px 8px;
     border: 9px solid transparent; border-image: url("/assets/input-frame.webp") 22 fill / 9px stretch;
     background: rgba(0, 0, 0, .6); background-clip: padding-box;
@@ -93,7 +93,7 @@
   .hint { font-size: 14px; color: var(--muted); margin: 12px 0 0; }
   #msg, #cmsg, #fmsg { font-size: 15px; margin: 12px 0 0; }
   #msg:empty, #cmsg:empty, #fmsg:empty { display: none; }
-  #folder p { margin: 0; overflow-wrap: anywhere; }
+  #folder button + button { margin-left: 10px; }
 
   /* Screenshots: gold-trimmed frames */
   #shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 18px; }
@@ -143,9 +143,14 @@
   <div class="panel settings" id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
     <section class="card" id="folder" hidden>
       <h2>WoW folder</h2>
-      <p id="gameDir"></p>
-      <button type="button" id="choose">Change…</button>
-      <p id="fmsg" class="failed" role="status"></p>
+      <form id="folderForm">
+        <label class="field"><span>The _forever_ folder in your WoW install</span>
+          <input type="text" id="gameDirInput" placeholder="C:\Program Files (x86)\World of Warcraft\_forever_" autocomplete="off" spellcheck="false">
+        </label>
+        <button type="button" id="browse" hidden>Browse…</button>
+        <button type="submit">Save</button>
+        <p id="fmsg" role="status"></p>
+      </form>
     </section>
     <section class="card">
       <h2>In game</h2>
@@ -250,8 +255,7 @@
   function render(st) {
     $("#notice").textContent = st.status.kind === "ok" ? "" : st.status.message;  // the tray shows the same
     $("#notice").className = st.status.kind;
-    $("#gameDir").textContent = st.gameDir || "Not chosen yet: pick the _forever_ folder in your WoW install.";
-    $("#choose").textContent = st.gameDir ? "Change…" : "Choose folder…";
+    $("#folder").hidden = !st.canChooseFolder;  // only the Windows app can change it
 
     const log = $("#log");
     log.replaceChildren();
@@ -295,6 +299,7 @@
       for (const k of COMPANION_TOGGLES) $("#" + k).checked = st.companion[k];
       for (const k of COMPANION_NUMBERS) $("#" + k).value = st.companion[k];
       deleteWasOn = st.companion.deleteShots;
+      $("#gameDirInput").value = st.gameDir;
       if (!tabChosen && !(st.gameDir && st.found && st.settings.webhook)) showTab("settings");
     }
     const key = JSON.stringify([st.status, st.gameDir, st.shots, st.history, st.log]);
@@ -337,12 +342,27 @@
     }
   });
 
-  // Inside the Windows app (desktop.py) the page can also pick the WoW folder.
-  window.addEventListener("pywebviewready", () => { $("#folder").hidden = false; });
-  $("#choose").addEventListener("click", async () => {
+  // The WoW folder (Windows app only): type or paste it, or Browse… inside the app window
+  function folderResult(res) {
+    const msg = $("#fmsg");
+    msg.className = res.error ? "failed" : "posted";
+    msg.textContent = res.error || "Saved. Brag watches this folder now.";
+    if (res.gameDir) { last = ""; load(true).catch(() => {}); }  // new folder: new settings and screenshots
+  }
+  window.addEventListener("pywebviewready", () => { $("#browse").hidden = false; });
+  $("#browse").addEventListener("click", async () => {
     const res = await window.pywebview.api.choose_folder();
-    $("#fmsg").textContent = res && res.error ? res.error : "";
-    if (res && res.gameDir) { last = ""; load(true).catch(() => {}); }  // new folder: new settings and screenshots
+    if (res) folderResult(res);  // null: the dialog was cancelled
+  });
+  $("#folderForm").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    try {
+      const r = await fetch("/api/folder", { method: "POST", headers: { "Content-Type": "application/json" },
+                                             body: JSON.stringify({ path: $("#gameDirInput").value.trim() }) });
+      folderResult(await r.json());
+    } catch {
+      folderResult({ error: "Can't reach the Brag companion. Is it still running?" });
+    }
   });
 
   // Tabs: the URL hash remembers the open one (#/settings, #/screenshots, #/log; not #settings, which would scroll to that form)

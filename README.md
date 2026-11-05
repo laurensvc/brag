@@ -28,6 +28,11 @@ So there are two parts:
 
    Its settings and log live in `%APPDATA%\Brag`.
 
+   The window uses Microsoft Edge WebView2, which Windows 11 and up-to-date Windows 10 already have. Without it,
+   Brag says so once and shows its page in your browser instead (the tray works the same; type or paste your
+   WoW folder under Settings). Install [WebView2](https://go.microsoft.com/fwlink/p/?LinkId=2124703) and restart
+   Brag to get the window back. `Brag.exe --browser` always uses the browser.
+
    **Mac/Linux (or Windows without the app):** run the script. It needs Python 3 and Pillow (curl ships with
    macOS and Windows 10+). Point it at your Forever game folder, the one that holds `Screenshots` and `WTF`:
    ```

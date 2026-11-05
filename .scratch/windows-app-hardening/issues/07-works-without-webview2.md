@@ -12,9 +12,11 @@ Source: Spec axis of the code review, finding (a), WebView2.
 
 **Blocked by:** 06 (A release can't upload to CurseForge twice)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Without the WebView2 runtime, the player ends up with a working settings page (window or browser) and a message explaining what happened
-- [ ] With the runtime present, nothing changes
-- [ ] The README's Windows section mentions WebView2 and what happens without it
-- [ ] Manual check documented in the ticket's PR/commit (how it was simulated)
+- [x] Without the WebView2 runtime, the player ends up with a working settings page (window or browser) and a message explaining what happened
+- [x] With the runtime present, nothing changes
+- [x] The README's Windows section mentions WebView2 and what happens without it
+- [x] Manual check documented in the ticket's PR/commit (how it was simulated)
+
+**Done:** chose the browser fallback. Brag checks the WebView2 runtime (Microsoft's registry check) at startup; without it, it says so once per PC and runs from the tray with the page in the browser. The WoW folder card now has a text field that saves through POST /api/folder, so the folder can be set without the window. Simulated with `--browser` (same code path minus the one-time message, which is unit-tested).

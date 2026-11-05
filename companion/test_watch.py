@@ -309,7 +309,17 @@ assert call("/api/show", f"http://127.0.0.1:{port}") == (200, {}) and shown == [
 assert call("/api/show", "https://evil.example")[0] == 403 and shown == [1]
 assert call("/api/settings", f"http://127.0.0.1:{port}", json.dumps(DEFAULTS).encode()) == (400, {"error": "Choose your WoW folder first."})
 with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/state") as r:
-    assert json.loads(r.read())["gameDir"] == ""
+    st = json.loads(r.read())
+    assert st["gameDir"] == "" and st["canChooseFolder"] is False
+# choosing the WoW folder from the page: only when the desktop app answers it
+me = f"http://127.0.0.1:{port}"
+assert call("/api/folder", me, b'{"path": "C:/x"}')[0] == 404
+watch.ON_FOLDER = lambda path: None if path == "C:/wow" else "That isn't a WoW folder."
+assert call("/api/folder", me, b'{"path": "C:/x"}') == (400, {"error": "That isn't a WoW folder."})
+assert call("/api/folder", me, b'{"path": " "}')[0] == 400
+assert call("/api/folder", me, b'{"path": "C:/wow"}')[0] == 200
+assert call("/api/folder", "https://evil.example", b'{"path": "C:/wow"}')[0] == 403
+watch.ON_FOLDER = None
 # the page's textures and font are served; nothing else from the folder is
 with urllib.request.urlopen(f"http://127.0.0.1:{port}/assets/Cinzel.ttf") as r:
     assert r.headers["Content-Type"] == "font/ttf"

@@ -3,11 +3,12 @@
 
   py companion\\desktop.py          run from source (py -m pip install pillow pystray pywebview)
   py companion\\desktop.py --tray   start in the tray, window hidden (what "Start with Windows" runs)
+  add --browser                     show the page in your browser instead of a window (automatic without WebView2)
 
 Closing the window keeps Brag running in the tray; Quit in the tray menu stops it. Settings, the post log and
 brag.log live in %APPDATA%\\Brag. windows\\build.ps1 turns this into Brag.exe and BragSetup.exe.
 """
-import ctypes, json, os, string, sys, threading, time, urllib.request, winreg
+import ctypes, json, os, string, sys, threading, time, urllib.request, webbrowser, winreg
 from PIL import Image, ImageDraw, ImageFont
 import watch
 
@@ -19,6 +20,10 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"  # "Start with Window
 RUN_VALUE = "Brag"
 MUTEX = "BragCompanion"  # brag.iss AppMutex: asks you to quit Brag before updating
 COLORS = {"ok": (232, 185, 84), "idle": (128, 120, 108), "failed": (239, 107, 91)}  # gold, grey, red
+# The Edge WebView2 runtime the window needs; Microsoft's documented way to check it's installed.
+WEBVIEW2 = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+WEBVIEW2_DOWNLOAD = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+NOT_WOW = "That isn't a WoW folder. Pick _forever_ in your WoW install: the one with Interface and WTF in it."
 
 window = icon = None
 ICONS = {}  # tray icon image per color name, made at startup
@@ -58,6 +63,15 @@ def load_app():
         return {}
 
 
+def use_folder(path):
+    """Use the WoW folder the player picked or typed (the install folder works too). Returns an error, or None."""
+    found = find_game_dir(path) if os.path.isdir(path) else None
+    if not found:
+        return NOT_WOW
+    set_game_dir(found)
+    return None
+
+
 def set_game_dir(path):
     watch.GAME_DIR = path  # the watcher picks it up within 2 seconds
     watch.write_atomic(APP_CONFIG, json.dumps({**load_app(), "gameDir": path}, indent=2))
@@ -73,11 +87,22 @@ class Api:
         picked = window.create_file_dialog(webview.FileDialog.FOLDER, directory=watch.GAME_DIR or "")
         if not picked:
             return None
-        path = find_game_dir(picked[0] if isinstance(picked, (list, tuple)) else picked)
-        if not path:
-            return {"error": "That isn't a WoW folder. Pick _forever_ in your WoW install: the one with Interface and WTF in it."}
-        set_game_dir(path)
-        return {"gameDir": path}
+        error = use_folder(picked[0] if isinstance(picked, (list, tuple)) else picked)
+        return {"error": error} if error else {"gameDir": watch.GAME_DIR}
+
+
+def webview2_installed():
+    keys = [(winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\WOW6432Node\\" + WEBVIEW2), (winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\\" + WEBVIEW2),
+            (winreg.HKEY_CURRENT_USER, "Software\\" + WEBVIEW2)]
+    for root, path in keys:
+        try:
+            with winreg.OpenKey(root, path) as key:
+                version, _ = winreg.QueryValueEx(key, "pv")
+            if version and version != "0.0.0.0":
+                return True
+        except OSError:
+            pass
+    return False
 
 
 # --- Start with Windows ---
@@ -165,6 +190,8 @@ def show(*_):
     if window:
         window.show()
         window.restore()
+    else:  # no WebView2: the page opens in the browser
+        webbrowser.open(URL)
 
 
 def toggle_pause(*_):
@@ -187,7 +214,8 @@ def quit_app(*_):
     global quitting
     quitting = True
     icon.stop()
-    window.destroy()
+    if window:
+        window.destroy()
 
 
 def on_closing():
@@ -209,8 +237,18 @@ def already_running():
         return False
 
 
-def message(text):
-    ctypes.windll.user32.MessageBoxW(None, text, "Brag", 0x10)  # MB_ICONERROR
+def message(text, icon=0x10):  # MB_ICONERROR; 0x40 is MB_ICONINFORMATION
+    ctypes.windll.user32.MessageBoxW(None, text, "Brag", icon)
+
+
+def warn_no_webview2():
+    """Once per PC: why Brag uses the browser, and how to get its window back."""
+    if load_app().get("webview2Warned"):
+        return
+    watch.write_atomic(APP_CONFIG, json.dumps({**load_app(), "webview2Warned": True}, indent=2))
+    message("Brag's window needs Microsoft Edge WebView2, which isn't installed on this PC, so Brag will show its "
+            "page in your browser instead. It still runs from the tray as usual.\n\nTo get the window, install "
+            f"WebView2 from Microsoft ({WEBVIEW2_DOWNLOAD}) and restart Brag.", 0x40)
 
 
 def second_launch(tray_only, ask_to_show=already_running, tell=message):
@@ -262,7 +300,11 @@ def main():
         game = detect_game_dir()
         if game:
             set_game_dir(game)
-    watch.say(f"Brag started, page at {URL}" + ("" if game else ". Choose your WoW folder in the window."))
+    browser = "--browser" in sys.argv or not webview2_installed()
+    if browser and "--browser" not in sys.argv:
+        watch.say("Microsoft Edge WebView2 isn't installed: Brag shows its page in your browser")
+        warn_no_webview2()
+    watch.say(f"Brag started, page at {URL}" + ("" if game else ". Choose your WoW folder under Settings."))
     threading.Thread(target=server.serve_forever, daemon=True, name="page").start()
 
     ICONS.update({k: make_icon(c) for k, c in COLORS.items()})
@@ -276,11 +318,18 @@ def main():
     ))
     watch.LISTENERS.append(on_result)
     watch.ON_SHOW = show
-    threading.Thread(target=icon.run, daemon=True, name="tray").start()
+    watch.ON_FOLDER = use_folder
     threading.Thread(target=keep_refreshing, daemon=True, name="status").start()
+    hidden = "--tray" in sys.argv and bool(game)
+    if browser:
+        if not hidden:
+            webbrowser.open(URL)
+        icon.run()  # until Quit
+        return
+    threading.Thread(target=icon.run, daemon=True, name="tray").start()
 
     window = webview.create_window("Brag", URL, js_api=Api(), width=1280, height=860, min_size=(420, 480),
-                                   hidden="--tray" in sys.argv and bool(game), background_color="#14110d")
+                                   hidden=hidden, background_color="#14110d")
     window.events.closing += on_closing
     webview.start()  # returns after Quit
 

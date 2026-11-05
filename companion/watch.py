@@ -47,6 +47,7 @@ PAUSED = threading.Event()  # new screenshots are skipped (not posted later) whi
 LINES = collections.deque(maxlen=200)  # recent output, for the page's Log card
 LISTENERS = []  # called with (name, status, plain caption) after each screenshot
 ON_SHOW = None  # POST /api/show calls this: a second Brag.exe asks the first to show its window
+ON_FOLDER = None  # POST /api/folder calls this with a path: returns an error message, or None once it's in use
 LAST_FAILURE = None  # why the last post failed, until a post works
 
 
@@ -545,7 +546,7 @@ def status():
 def state(game_dir):
     kind, message = status()
     app = {"gameDir": game_dir or "", "paused": PAUSED.is_set(), "log": list(LINES)[::-1],
-           "status": {"kind": kind, "message": message}}
+           "status": {"kind": kind, "message": message}, "canChooseFolder": ON_FOLDER is not None}
     if not game_dir:
         return {"found": False, "settings": dict(DEFAULTS), "companion": load_companion(), "shots": [], "history": [], **app}
     db, history = load_saved(game_dir)
@@ -625,12 +626,22 @@ class Handler(BaseHTTPRequestHandler):
             if ON_SHOW:
                 ON_SHOW()
             return self.send(200 if ON_SHOW else 404, "{}")
-        if self.path not in ("/api/settings", "/api/companion"):
+        if self.path not in ("/api/settings", "/api/companion", "/api/folder"):
             return self.send(404, "{}")
         try:
             new = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
         except ValueError:
             new = None
+        if self.path == "/api/folder":  # the desktop app lets the page choose the WoW folder
+            if not ON_FOLDER:
+                return self.send(404, "{}")
+            path = new.get("path") if isinstance(new, dict) else None
+            if not isinstance(path, str) or not path.strip():
+                return self.send(400, json.dumps({"error": "Type or paste the folder first."}))
+            error = ON_FOLDER(path.strip())
+            if error:
+                return self.send(400, json.dumps({"error": error}))
+            return self.send(200, json.dumps({"gameDir": GAME_DIR}))
         if self.path == "/api/companion":
             error = validate_companion(new)
             if error:
