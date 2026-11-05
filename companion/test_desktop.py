@@ -19,12 +19,12 @@ with tempfile.TemporaryDirectory() as d:
     with open(os.path.join(saved, "Brag.lua"), "w") as f:
         f.write('BragDB = {\n["webhook"] = "https://discord.com/api/webhooks/1/abc",\n["enabled"] = true,\n}\n')
     assert desktop.status() == ("ok", "Brag: watching for screenshots")
-    desktop.failed = "webhook was deleted (HTTP 404)"
+    desktop.last_failure = "webhook was deleted (HTTP 404)"
     assert desktop.status() == ("failed", "Brag: webhook was deleted (HTTP 404)")
     watch.PAUSED.set()
     assert desktop.status() == ("idle", "Brag: paused")
     watch.PAUSED.clear()
-    watch.GAME_DIR, desktop.failed = None, None
+    watch.GAME_DIR, desktop.last_failure = None, None
 
 # "Start with Windows" runs Brag in the tray, without a console window
 assert desktop.launch_command().endswith('desktop.py" --tray') and "pythonw.exe" in desktop.launch_command()

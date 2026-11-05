@@ -11,9 +11,9 @@ Source: the Standards axis of the code review of the Windows tray app (smells 4,
 
 **Blocked by:** None (can start immediately). Prerequisite: the Windows tray app work is committed.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The watcher's per-pass state is a named type; no anonymous `(folder, seen, cleaned)` tuples remain
-- [ ] Each duplicated piece listed above exists once and is reused
-- [ ] The four unclear names above are renamed or restructured
-- [ ] No behaviour change: all three test suites pass unchanged (or with only renames), and the CLI companion and the tray app start and post as before
+- [x] The watcher's per-pass state is a named type; no anonymous `(folder, seen, cleaned)` tuples remain
+- [x] Each duplicated piece listed above exists once and is reused
+- [x] The four unclear names above are renamed or restructured
+- [x] No behaviour change: all three test suites pass unchanged (or with only renames), and the CLI companion and the tray app start and post as before

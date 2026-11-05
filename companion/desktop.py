@@ -19,7 +19,10 @@ MUTEX = "BragCompanion"  # windows\brag.iss uses it too, to ask you to quit Brag
 COLORS = {"ok": (232, 185, 84), "idle": (128, 120, 108), "failed": (239, 107, 91)}  # gold, grey, red
 
 window = icon = None
-failed = None  # the last failed post, until a post works or you open the window
+ICONS = {}  # tray icon image per color name, made at startup
+icon_color = None  # the color name the tray icon shows now
+last_failure = None  # why the last post failed, until a post works or you open the window
+warned_no_webhook = False  # the "no webhook yet" notification shows once per session
 quitting = False
 
 
@@ -65,7 +68,8 @@ class Api:
     """Called from the page (window.pywebview.api); only exists inside the app window."""
 
     def choose_folder(self):
-        picked = window.create_file_dialog(FOLDER, directory=watch.GAME_DIR or "")
+        import webview
+        picked = window.create_file_dialog(webview.FileDialog.FOLDER, directory=watch.GAME_DIR or "")
         if not picked:
             return None
         path = find_game_dir(picked[0] if isinstance(picked, (list, tuple)) else picked)
@@ -124,8 +128,8 @@ def status():
         return "idle", "Brag: choose your WoW folder"
     if watch.PAUSED.is_set():
         return "idle", "Brag: paused"
-    if failed:
-        return "failed", "Brag: " + failed[:110]  # Windows cuts tooltips at 127 characters
+    if last_failure:
+        return "failed", "Brag: " + last_failure[:110]  # Windows cuts tooltips at 127 characters
     db, _ = watch.load_saved(watch.GAME_DIR)
     if not watch.WEBHOOK.match(db.get("webhook", "")):
         return "idle", "Brag: no Discord webhook yet (/brag in WoW)"
@@ -135,6 +139,7 @@ def status():
 
 
 def refresh():
+    global icon_color
     if not icon:
         return
     try:
@@ -144,8 +149,8 @@ def refresh():
         return
     if icon.title != title:
         icon.title = title
-    if getattr(icon, "_brag_color", None) != color:
-        icon.icon, icon._brag_color = ICONS[color], color
+    if icon_color != color:
+        icon.icon, icon_color = ICONS[color], color
 
 
 def keep_refreshing():
@@ -155,21 +160,21 @@ def keep_refreshing():
 
 
 def on_result(name, result, text):
-    global failed
+    global last_failure, warned_no_webhook
     if result.startswith("failed"):
-        failed = result.removeprefix("failed: ")
-        icon.notify(f"{text or name}\n{failed}"[:250], "Brag couldn't post a screenshot")
+        last_failure = result.removeprefix("failed: ")
+        icon.notify(f"{text or name}\n{last_failure}"[:250], "Brag couldn't post a screenshot")
     elif result.startswith("posted"):
-        failed = None
-    elif result == "skipped: no webhook set" and not getattr(on_result, "warned", False):
-        on_result.warned = True  # once per session: every screenshot would say the same
+        last_failure = None
+    elif result == "skipped: no webhook set" and not warned_no_webhook:
+        warned_no_webhook = True  # once per session: every screenshot would say the same
         icon.notify("Type /brag in WoW, paste your Discord webhook, then Save & reload.", "Brag has no webhook yet")
     refresh()
 
 
 def show(*_):
-    global failed
-    failed = None  # you've seen it now
+    global last_failure
+    last_failure = None  # you've seen it now
     refresh()
     if window:
         window.show()
@@ -187,7 +192,7 @@ def toggle_pause(*_):
 
 
 def open_screenshots(*_):
-    folder = os.path.join(watch.GAME_DIR, "Screenshots")
+    folder = watch.screenshots_dir(watch.GAME_DIR)
     os.makedirs(folder, exist_ok=True)
     os.startfile(folder)
 
@@ -230,14 +235,13 @@ def log_crashes():
 
 
 def main():
-    global window, icon, ICONS, FOLDER
+    global window, icon
     if "--write-icon" in sys.argv:  # used by windows\build.ps1
         path = sys.argv[sys.argv.index("--write-icon") + 1]
         make_icon(COLORS["ok"], 256).save(path, sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 128, 256)])
         return
     import pystray, webview  # only needed for the app itself, not for --write-icon
 
-    FOLDER = webview.FileDialog.FOLDER
     if sys.stdout:
         sys.stdout.reconfigure(errors="replace")
     os.makedirs(APPDATA, exist_ok=True)
@@ -268,7 +272,7 @@ def main():
     watch.say(f"Brag started, page at {URL}" + ("" if game else ". Choose your WoW folder in the window."))
     threading.Thread(target=server.serve_forever, daemon=True, name="page").start()
 
-    ICONS = {k: make_icon(c) for k, c in COLORS.items()}
+    ICONS.update({k: make_icon(c) for k, c in COLORS.items()})
     icon = pystray.Icon("Brag", ICONS["idle"], "Brag", pystray.Menu(
         pystray.MenuItem("Open Brag", show, default=True),  # also a left click on the icon
         pystray.MenuItem("Pause posting", toggle_pause, checked=lambda _: watch.PAUSED.is_set()),

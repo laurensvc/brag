@@ -212,34 +212,34 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
     watch.LISTENERS.append(lambda *r: results.append(r))
     try:
         watch.GAME_DIR = None
-        assert watch.check((None, set(), 0)) == (None, set(), 0)
+        assert watch.watch_once(watch.Watching()) == watch.Watching()
         state = watch.state(None)  # no folder yet: the page still loads
         assert state["gameDir"] == "" and state["shots"] == [] and not state["found"]
 
         watch.GAME_DIR = a
         noisy(8, 8).save(os.path.join(a, "before.jpg"))  # not in Screenshots: ignored
-        w = watch.check((None, set(), 0))
-        assert w[0] == os.path.join(a, "Screenshots") and os.path.isdir(w[0])  # created for WoW
-        noisy(8, 8).save(os.path.join(w[0], "one.jpg"))
-        with open(os.path.join(w[0], "notes.txt"), "w") as f:
+        w = watch.watch_once(watch.Watching())
+        assert w.folder == os.path.join(a, "Screenshots") and os.path.isdir(w.folder)  # created for WoW
+        noisy(8, 8).save(os.path.join(w.folder, "one.jpg"))
+        with open(os.path.join(w.folder, "notes.txt"), "w") as f:
             f.write("x")
-        w = watch.check(w)
+        w = watch.watch_once(w)
         assert handled == [(a, "one.jpg")] and results == [("one.jpg", "posted", "cap")]
 
         watch.PAUSED.set()
-        noisy(8, 8).save(os.path.join(w[0], "two.jpg"))
-        w = watch.check(w)
+        noisy(8, 8).save(os.path.join(w.folder, "two.jpg"))
+        w = watch.watch_once(w)
         watch.PAUSED.clear()
-        w = watch.check(w)  # skipped while paused, and not posted after resuming
+        w = watch.watch_once(w)  # skipped while paused, and not posted after resuming
         assert len(handled) == 1 and results[-1] == ("two.jpg", "skipped: paused", "")
         assert watch.statuses()["two.jpg"]["status"] == "skipped: paused"
 
         os.makedirs(os.path.join(b, "Screenshots"))
         noisy(8, 8).save(os.path.join(b, "Screenshots", "old.jpg"))  # already there when we switch: not posted
         watch.GAME_DIR = b
-        w = watch.check(w)
+        w = watch.watch_once(w)
         noisy(8, 8).save(os.path.join(b, "Screenshots", "new.jpg"))
-        w = watch.check(w)
+        w = watch.watch_once(w)
         assert handled[1:] == [(b, "new.jpg")]
         assert any("Watching" in line["text"] and b in line["text"] for line in watch.LINES)
         assert watch.state(b)["log"][0]["text"] == "posted: new.jpg (cap)"  # newest first

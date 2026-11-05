@@ -6,7 +6,7 @@ Usage: python3 watch.py "<WoW install>/_forever_"   (opens http://127.0.0.1:8765
 Needs Pillow: python3 -m pip install pillow
 On Windows, desktop.py runs the same companion from the system tray.
 """
-import collections, glob, json, math, os, re, subprocess, sys, tempfile, threading, time, urllib.parse, webbrowser
+import collections, dataclasses, glob, json, math, os, re, subprocess, sys, tempfile, threading, time, urllib.parse, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 try:
@@ -17,8 +17,9 @@ except ImportError:
 PORT = 8765
 ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
 HERE = os.path.dirname(os.path.abspath(__file__))
-PAGE = os.path.join(getattr(sys, "_MEIPASS", HERE), "index.html")  # _MEIPASS: inside the Windows app's bundle
-ASSETS = os.path.join(getattr(sys, "_MEIPASS", HERE), "assets")  # the page's textures and font (see assets/CREDITS.md)
+BUNDLE = getattr(sys, "_MEIPASS", HERE)  # where the page's files are: here, or inside the Windows app's bundle
+PAGE = os.path.join(BUNDLE, "index.html")
+ASSETS = os.path.join(BUNDLE, "assets")  # the page's textures and font (see assets/CREDITS.md)
 ASSET_TYPES = {".webp": "image/webp", ".ttf": "font/ttf"}
 # The desktop app points these at %APPDATA%\Brag, so settings survive updates.
 LOG = os.path.join(HERE, "brag-log.jsonl")
@@ -46,6 +47,14 @@ PAUSED = threading.Event()  # new screenshots are skipped (not posted later) whi
 LINES = collections.deque(maxlen=200)  # recent output, for the page's Log card
 LISTENERS = []  # called with (name, status, plain caption) after each screenshot
 ON_SHOW = None  # POST /api/show calls this: a second Brag.exe asks the first to show its window
+
+
+def screenshots_dir(game_dir):
+    return os.path.join(game_dir, "Screenshots")
+
+
+def plural(n, word):
+    return f"{n} {word}{'s' * (n != 1)}"
 
 
 def say(text):
@@ -351,7 +360,7 @@ def cleanup(game_dir, cfg, now=None):
         if len(keep) != len(lines):
             write_atomic(LOG, "".join(keep))
     removed = 0
-    shots = os.path.join(game_dir, "Screenshots") if game_dir else ""
+    shots = screenshots_dir(game_dir) if game_dir else ""
     if cfg["deleteShots"] and os.path.isdir(shots):
         for name in os.listdir(shots):
             path = os.path.join(shots, name)
@@ -366,7 +375,7 @@ def cleanup(game_dir, cfg, now=None):
 
 def handle(game_dir, name):
     """Read, caption and post one new screenshot. Returns (status, plain caption)."""
-    img = open_when_ready(os.path.join(game_dir, "Screenshots", name))
+    img = open_when_ready(os.path.join(screenshots_dir(game_dir), name))
     payload, crop = read_strip(img) if img else (None, 0)
     db, _ = load_saved(game_dir)  # re-read each time so settings changes apply
     cfg = load_companion()
@@ -387,23 +396,30 @@ def handle(game_dir, name):
     return status, caption(payload, md=False)
 
 
-def check(watching):
-    """One pass of the watcher. `watching` is (Screenshots folder, names seen, last cleanup); returns the next one."""
-    shots, seen, cleaned = watching
+@dataclasses.dataclass
+class Watching:
+    """What the watcher remembers between passes."""
+    folder: str = None  # the Screenshots folder being watched; None until a WoW folder is chosen
+    seen: set = dataclasses.field(default_factory=set)  # file names already there or already handled
+    cleaned: float = 0  # when old history (and maybe old screenshots) was last cleaned up
+
+
+def watch_once(watching):
+    """Handle the screenshots that appeared since the last pass; returns what to remember for the next one."""
     if not GAME_DIR:
-        return None, set(), 0
-    if shots != os.path.join(GAME_DIR, "Screenshots"):  # first pass, or a new WoW folder
-        shots = os.path.join(GAME_DIR, "Screenshots")
-        os.makedirs(shots, exist_ok=True)  # WoW only creates it on the first screenshot
-        seen, cleaned = set(os.listdir(shots)), 0
-        say(f"Watching {shots}")
-    if time.time() - cleaned > 3600:
+        return Watching()
+    if watching.folder != screenshots_dir(GAME_DIR):  # first pass, or a new WoW folder
+        watching = Watching(screenshots_dir(GAME_DIR))
+        os.makedirs(watching.folder, exist_ok=True)  # WoW only creates it on the first screenshot
+        watching.seen = set(os.listdir(watching.folder))
+        say(f"Watching {watching.folder}")
+    if time.time() - watching.cleaned > 3600:
         removed = cleanup(GAME_DIR, load_companion())
-        cleaned = time.time()
+        watching.cleaned = time.time()
         if removed:
-            say(f"Deleted {removed} old screenshot{'s' * (removed != 1)}")
-    for name in sorted(set(os.listdir(shots)) - seen):
-        seen.add(name)
+            say(f"Deleted {plural(removed, 'old screenshot')}")
+    for name in sorted(set(os.listdir(watching.folder)) - watching.seen):
+        watching.seen.add(name)
         if not name.lower().endswith(IMAGES):
             continue
         if PAUSED.is_set():
@@ -417,19 +433,19 @@ def check(watching):
         say(f"{status}: {name}" + (f" ({text})" if text else ""))
         for fn in LISTENERS:
             fn(name, status, text)
-    return shots, seen, cleaned
+    return watching
 
 
 def watch():
-    watching, error = (None, set(), 0), None
+    watching, error = Watching(), None
     while True:
         try:
-            watching, error = check(watching), None
+            watching, error = watch_once(watching), None
         except OSError as e:  # folder gone, drive unplugged: keep trying, but say so once
             if str(e) != error:
                 error = str(e)
                 say(f"Can't read the Screenshots folder: {e}")
-            watching = (None, set(), 0)
+            watching = Watching()
         time.sleep(2)
 
 
@@ -442,7 +458,7 @@ def state(game_dir):
     db, history = load_saved(game_dir)
     for h in history:
         h["text"] = CODES.sub("", str(h.get("text", "")))
-    shots = os.path.join(game_dir, "Screenshots")
+    shots = screenshots_dir(game_dir)
     names = os.listdir(shots) if os.path.isdir(shots) else []
     times = {n: os.path.getmtime(os.path.join(shots, n)) for n in names if n.lower().endswith(IMAGES)}
     # shortcut: only the newest 60 screenshots are shown; add paging if people want to dig further back
@@ -478,6 +494,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_file(self, folder, name, ctype):
+        """Send folder/name if it's a file listed in folder (which also refuses ../ tricks). False if not."""
+        if not (ctype and os.path.isdir(folder) and name in os.listdir(folder)):
+            return False
+        with open(os.path.join(folder, name), "rb") as f:
+            self.send(200, f.read(), ctype)
+        return True
+
     def local(self):
         # stops other websites (incl. DNS rebinding) from reading screenshots or changing the webhook
         return "http://" + self.headers.get("Host", "") in ORIGINS
@@ -490,16 +514,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, f.read(), "text/html; charset=utf-8")
         if self.path == "/api/state":
             return self.send(200, json.dumps(state(GAME_DIR)))
-        asset = self.path.removeprefix("/assets/")
-        ctype = ASSET_TYPES.get(os.path.splitext(asset)[1])
-        if self.path.startswith("/assets/") and ctype and asset in os.listdir(ASSETS):  # listdir check blocks ../
-            with open(os.path.join(ASSETS, asset), "rb") as f:
-                return self.send(200, f.read(), ctype)
-        shots = os.path.join(GAME_DIR or "", "Screenshots")
-        name = urllib.parse.unquote(self.path.removeprefix("/shots/"))
-        if self.path.startswith("/shots/") and GAME_DIR and os.path.isdir(shots) and name in os.listdir(shots):  # blocks ../
-            with open(os.path.join(shots, name), "rb") as f:
-                return self.send(200, f.read(), "image/png" if name.lower().endswith(".png") else "image/jpeg")
+        if self.path.startswith("/assets/"):
+            name = self.path.removeprefix("/assets/")
+            if self.send_file(ASSETS, name, ASSET_TYPES.get(os.path.splitext(name)[1])):
+                return
+        elif self.path.startswith("/shots/") and GAME_DIR:
+            name = urllib.parse.unquote(self.path.removeprefix("/shots/"))
+            ctype = "image/png" if name.lower().endswith(".png") else "image/jpeg"
+            if self.send_file(screenshots_dir(GAME_DIR), name, ctype):
+                return
         self.send(404, "{}")
 
     def do_POST(self):
@@ -521,7 +544,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(400, json.dumps({"error": error}))
             save_companion(new)
             removed = cleanup(GAME_DIR, new)
-            say("Posting settings saved" + (f"; deleted {removed} old screenshot{'s' * (removed != 1)}" if removed else ""))
+            say("Posting settings saved" + (f"; deleted {plural(removed, 'old screenshot')}" if removed else ""))
             return self.send(200, json.dumps({"removed": removed}))
         error = validate(new)
         path = settings_file(GAME_DIR) if GAME_DIR else None
