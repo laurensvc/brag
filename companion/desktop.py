@@ -10,7 +10,7 @@ Closing the window keeps Brag running in the tray; Quit in the tray menu stops i
 brag.log live in %APPDATA%\\Brag. windows\\build.ps1 turns this into Brag.exe and BragSetup.exe.
 """
 import argparse, ctypes, json, os, shutil, string, sys, threading, time, urllib.request, webbrowser, winreg
-from PIL import Image, ImageDraw, ImageFont
+from brag_icon import make_icon, write_ico
 import watch
 
 APPDATA = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Brag")
@@ -183,18 +183,6 @@ def set_autostart(on):
 
 # --- tray ---
 
-def make_icon(color, size=64):
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle([1, 1, size - 2, size - 2], radius=size // 5, fill=color)
-    try:
-        font = ImageFont.truetype("segoeuib.ttf", int(size * 0.72))  # Segoe UI Bold, on every Windows
-    except OSError:
-        font = ImageFont.load_default(size=int(size * 0.72))
-    d.text((size / 2, size / 2), "B", font=font, fill=(26, 20, 8), anchor="mm")
-    return img
-
-
 def tray_state():
     """(icon color, tooltip) from the companion's status, which the page shows too."""
     kind, message = watch.status()
@@ -323,7 +311,7 @@ def main():
     global window, icon
     args = parse_args(sys.argv[1:])
     if args.write_icon:
-        make_icon(COLORS["ok"], 256).save(args.write_icon, sizes=[(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 128, 256)])
+        write_ico(args.write_icon)
         return
     import pystray, webview  # only needed for the app itself, not for --write-icon
 

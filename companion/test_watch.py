@@ -442,8 +442,9 @@ with tempfile.TemporaryDirectory() as game:
     watch.GAME_DIR = game
     watch.watch_once(watch.Watching())
     assert watch.addon_status(game) == ("ok", ours)
-    with open(os.path.join(watch.ADDON, "Brag.lua"), "rb") as a, open(os.path.join(target, "Brag.lua"), "rb") as b:
-        assert a.read() == b.read()
+    for name in ("Brag.lua", "Brag.toc", "icon.tga"):
+        with open(os.path.join(watch.ADDON, name), "rb") as a, open(os.path.join(target, name), "rb") as b:
+            assert a.read() == b.read()
     with open(os.path.join(target, "Brag.toc"), "w") as f:
         f.write("## Interface: 11507\n## Version: 0.1\n")
     assert watch.addon_status(game) == ("outdated", "0.1")

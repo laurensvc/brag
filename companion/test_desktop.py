@@ -1,5 +1,6 @@
 # Windows only: the tray app's own logic (the window and tray icon themselves are checked by hand).
-import os, tempfile
+import os, struct, tempfile
+from PIL import Image
 import desktop, watch
 
 with tempfile.TemporaryDirectory() as d:
@@ -37,8 +38,29 @@ with tempfile.TemporaryDirectory() as d:
 
 # "Start with Windows" runs Brag in the tray, without a console window
 assert desktop.launch_command().endswith('desktop.py" --tray') and "pythonw.exe" in desktop.launch_command()
-icon = desktop.make_icon(desktop.COLORS["failed"])
-assert icon.size == (64, 64) and icon.getpixel((32, 4))[:3] == desktop.COLORS["failed"]
+for color in desktop.COLORS.values():
+    for size in (16, 24, 32, 64, 256):
+        icon = desktop.make_icon(color, size)
+        assert icon.size == (size, size) and icon.mode == "RGBA"
+        assert icon.getpixel((0, size - 1))[3] == 0
+        # Check the unblended rim; small exports also blend it into the dark field.
+        if size == 256:
+            assert icon.getpixel((size // 2, size // 8))[:3] == color
+with tempfile.TemporaryDirectory() as d:
+    path = os.path.join(d, "brag.ico")
+    desktop.write_ico(path)
+    with Image.open(path) as ico:
+        assert ico.ico.sizes() == {(s, s) for s in (16, 20, 24, 32, 40, 48, 64, 128, 256)}
+        with Image.open(os.path.join(watch.ASSETS, "brag.ico")) as shipped:
+            assert shipped.ico.sizes() == ico.ico.sizes()
+            assert shipped.tobytes() == ico.tobytes()
+with open(os.path.join(watch.ADDON, "icon.tga"), "rb") as f:
+    header = f.read(18)
+    assert header[2] == 2  # uncompressed true-color
+    assert struct.unpack_from("<HH", header, 12) == (64, 64)
+    assert header[16] == 32 and header[17] & 15 == 8  # RGBA, 8 alpha bits
+with Image.open(os.path.join(watch.ADDON, "icon.tga")) as texture:
+    assert texture.mode == "RGBA" and texture.tobytes() == desktop.make_icon(desktop.COLORS["ok"]).tobytes()
 
 # a second launch while Brag runs: the player's launch shows the window, a login launch stays quiet
 asked, told = [], []
