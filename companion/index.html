@@ -248,6 +248,7 @@
       <summary><h2>Advanced</h2></summary>
       <form id="companion">
         <label class="row"><input type="checkbox" id="caption"> Add a caption (who, what, where)</label>
+        <label class="row"><input type="checkbox" id="funny"> Funny captions ("Pierre has no life and has reached level 10")</label>
         <label class="field"><span>Retries when Discord or the network fails</span>
           <select id="retries">
             <option value="0">Don't retry</option><option value="1">1</option>
@@ -302,7 +303,7 @@
 <script>
   const $ = s => document.querySelector(s);
   const TOGGLES = ["enabled", "level", "quest", "loot", "boss", "death"];
-  const COMPANION_TOGGLES = ["caption", "deleteShots"];
+  const COMPANION_TOGGLES = ["caption", "funny", "deleteShots"];
   const COMPANION_NUMBERS = ["retries", "maxHeight", "jpegQuality", "keepDays"];
   let deleteWasOn = false;
   const fmt = t => new Date(t * 1000).toLocaleString();

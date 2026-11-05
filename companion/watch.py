@@ -6,8 +6,9 @@ Usage: python3 watch.py "<WoW install>/_forever_"   (opens http://127.0.0.1:8765
 Needs Pillow: python3 -m pip install pillow
 On Windows, desktop.py runs the same companion from the system tray.
 """
-import collections, dataclasses, glob, json, math, os, re, shutil, subprocess, sys, tempfile, threading, time, traceback, urllib.parse, webbrowser
+import collections, dataclasses, glob, json, math, os, re, shutil, subprocess, sys, tempfile, threading, time, traceback, urllib.parse, webbrowser, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from flavor import FLAVOR
 
 try:
     from PIL import Image
@@ -33,8 +34,8 @@ DEFAULTS = {"enabled": True, "level": True, "quest": True, "loot": True, "boss":
 TOGGLES = [k for k, v in DEFAULTS.items() if isinstance(v, bool)]
 # Settings only the companion uses, so they live in its own file and can be changed while WoW runs.
 # webhook: the Discord link set in the app; it wins over the one typed in game (/brag), which is the fallback.
-COMPANION_DEFAULTS = {"caption": True, "retries": 3, "maxHeight": 1080, "jpegQuality": 85, "keepDays": 7, "deleteShots": False,
-                      "webhook": ""}
+COMPANION_DEFAULTS = {"caption": True, "funny": True, "retries": 3, "maxHeight": 1080, "jpegQuality": 85, "keepDays": 7,
+                      "deleteShots": False, "webhook": ""}
 HEIGHTS = (0, 720, 1080, 1440, 2160)  # 0 = keep the original size
 MAX_BYTES = 8 * 1024 * 1024  # smallest Discord webhook upload limit (servers without boosts)
 QUALITY = {0: "Poor", 1: "Common", 2: "Uncommon", 3: "Rare", 4: "Epic", 5: "Legendary", 6: "Artifact"}
@@ -208,7 +209,7 @@ def validate_companion(s):
     """Return an error message, or None if the companion settings are valid."""
     if not isinstance(s, dict) or set(s) != set(COMPANION_DEFAULTS):
         return "Bad request"
-    if not all(isinstance(s[k], bool) for k in ("caption", "deleteShots")):
+    if not all(isinstance(s[k], bool) for k in ("caption", "funny", "deleteShots")):
         return "Bad request"
     num = lambda k, lo, hi: type(s[k]) is int and lo <= s[k] <= hi
     if not num("retries", 0, 3):
@@ -344,8 +345,10 @@ def read_strip(img):
     return None, 0
 
 
-def caption(payload, md=True):
-    """Turn the strip payload into the post text: Discord markdown, or plain for the page."""
+def caption(payload, md=True, funny=False, seed=""):
+    """Turn the strip payload into the post text: Discord markdown, or plain for the page. funny: a joke line from
+    flavor.py instead of the plain one, picked by payload + seed (the screenshot's name), so the post and the page
+    get the same line and the next screenshot most likely a different one."""
     f = (payload or "").split("\t")
     if len(f) < 8 or f[0] != "1":
         return ""
@@ -354,14 +357,21 @@ def caption(payload, md=True):
     bold = (lambda s: f"**{esc(s)}**") if md else esc
     who = bold(name or "Someone")
     q = QUALITY.get(int(quality)) if quality.isdigit() else None
-    head = {
-        "level": f"🎉 {who} reached {bold('level ' + level)}!",
-        "quest": f"📜 {who} completed {bold(detail)}",
-        "loot": f"💎 {who} looted {bold('[' + detail + ']')}" + (f" ({q})" if q else ""),
-        "boss": f"⚔️ {who} defeated {bold(detail)}!",
-        "death": f"💀 {who} died",
-        "test": f"✅ Brag test from {who}: if you can read this, you're all set!",
-    }.get(kind)
+    item = bold("[" + detail + "]") + (f" ({q})" if q else "")  # "[name] (Epic)": the page colors it by quality
+    lines = FLAVOR.get(kind) if funny else None
+    if lines:
+        line = lines[zlib.crc32(f"{payload}\t{seed}".encode()) % len(lines)]
+        head = line.format(who=who, level=bold(level), quest=bold(detail), item=item, boss=bold(detail),
+                           zone=esc(zone or "Azeroth"))
+    else:
+        head = {
+            "level": f"🎉 {who} reached {bold('level ' + level)}!",
+            "quest": f"📜 {who} completed {bold(detail)}",
+            "loot": f"💎 {who} looted {item}",
+            "boss": f"⚔️ {who} defeated {bold(detail)}!",
+            "death": f"💀 {who} died",
+            "test": f"✅ Brag test from {who}: if you can read this, you're all set!",
+        }.get(kind)
     if not head:
         return ""
     info = " · ".join(esc(x) for x in (cls if kind == "level" else f"Level {level} {cls}".strip(), zone) if x)
@@ -537,8 +547,9 @@ def handle(game_dir, name):
         with tempfile.TemporaryDirectory() as d:
             out = os.path.join(d, os.path.splitext(name)[0] + ".jpg")
             prepare(img, cfg, out)
-            status = post(out, caption(payload) if cfg["caption"] else "", webhook, cfg["retries"])
-    return status, caption(payload, md=False)
+            text = caption(payload, funny=cfg["funny"], seed=name) if cfg["caption"] else ""
+            status = post(out, text, webhook, cfg["retries"])
+    return status, caption(payload, md=False, funny=cfg["funny"], seed=name)
 
 
 @dataclasses.dataclass

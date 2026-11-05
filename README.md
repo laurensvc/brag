@@ -71,6 +71,9 @@ encodes the event, your character, level, zone and the quest or item. The compan
 and posts the caption with the image. Screenshots you take yourself have no strip and go out without a caption.
 The strip format is documented next to `drawStrip` in `Brag/Brag.lua` and `read_strip` in `companion/watch.py`.
 
+By default each caption is a random joke line ("💀 **Pierre** found out what that red circle does"); switch
+**Funny captions** off under Advanced for plain ones. The lines are in `companion/flavor.py`: add your own there.
+
 ## Testing without WoW
 `companion/fakewow.py` runs the real addon in Lua 5.1 with a mock of the WoW API. It renders the screenshots
 WoW would take (banner and data strip included) and writes SavedVariables like a logout, so the real

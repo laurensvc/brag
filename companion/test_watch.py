@@ -110,6 +110,26 @@ assert caption("1\tdeath\tThrall\tShaman\t60\tMolten Core\t\t", md=False) == "�
 assert validate({**DEFAULTS, "death": "no"}) and validate({k: v for k, v in DEFAULTS.items() if k != "boss"})
 assert caption("2\tfuture\tformat") == caption(None) == caption("1\tdance\ta\tb\tc\td\te\tf") == ""
 
+# funny captions: every line fills in for its event, with names escaped; the post and the page get the same line
+import flavor
+events = {"level": "1\tlevel\tPi*erre\tMage\t10\t\t\t", "quest": QUEST, "loot": LOOT,
+          "boss": "1\tboss\tThrall\tShaman\t60\tMolten Core\tRagnaros\t", "death": "1\tdeath\tThrall\tShaman\t60\t\t\t"}
+assert set(flavor.FLAVOR) == set(events) and all(len(lines) >= 10 for lines in flavor.FLAVOR.values())
+for kind, lines in flavor.FLAVOR.items():
+    for line in lines:
+        assert not watch.MARKDOWN.search(line.replace("{", "").replace("}", "")), line  # plain text, see flavor.py
+        line.format(who="", level="", quest="", item="", boss="", zone="")  # no unknown placeholders
+    assert len(set(lines)) == len(lines), kind  # no line twice
+    seen = {caption(events[kind], md=False, funny=True, seed=str(i)) for i in range(2000)}
+    assert len(seen) == len(lines), (kind, len(seen))  # every line comes up
+for i in range(40):
+    md, plain = caption(LOOT, funny=True, seed=str(i)), caption(LOOT, md=False, funny=True, seed=str(i))
+    assert md.replace("**", "").replace("\\", "") == plain.replace(" · ", "\n-# ", 1), (md, plain)
+    assert "(Legendary)" in plain and "-# Level 60 Shaman · Molten Core" in md
+assert all("Pi\\*erre" in caption(events["level"], funny=True, seed=str(i)) for i in range(40))
+assert caption(events["death"], md=False, funny=True, seed="x") == caption(events["death"], md=False, funny=True, seed="x")
+assert caption(LOOT, funny=False) == caption(LOOT)  # switched off: the plain line
+
 
 # --- image prep and posting ---
 
@@ -189,7 +209,9 @@ with tempfile.TemporaryDirectory() as game:
     status, text = watch.handle(game, "WoWScrnShot_1.jpg")
     watch.post = real_post
     img, sent, hook, retries = posted[0]
-    assert (status, text, sent, hook, retries) == (watch.Result("posted"), caption(LOOT, md=False), caption(LOOT), HOOK, 3)
+    funny = lambda md: caption(LOOT, md=md, funny=True, seed="WoWScrnShot_1.jpg")  # the default: a joke line
+    assert (status, text, sent, hook, retries) == (watch.Result("posted"), funny(False), funny(True), HOOK, 3)
+    assert "[Thunderfury, Blessed Blade of the Windseeker] (Legendary)" in text  # the page still colors the item
     assert img.width == 1920 and 1000 < img.height < 1080 and read_strip(img) == (None, 0)  # strip cropped off
 
     with open(watch.CONFIG, "w") as f:
