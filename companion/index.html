@@ -31,7 +31,8 @@
     color: var(--gold-soft); text-shadow: 0 1px 0 #000;
     border-bottom: 1px solid; border-image: linear-gradient(90deg, rgba(227, 183, 90, .8), transparent) 1;
   }
-  #notice { font: 700 15px/1.3 var(--title); color: var(--bad); text-shadow: 0 0 10px rgba(255, 60, 20, .5), 0 1px 0 #000; }
+  #notice { font: 700 15px/1.3 var(--title); color: var(--gold-soft); text-shadow: 0 1px 2px #000; }
+  #notice.failed, #notice.off { color: var(--bad); text-shadow: 0 0 10px rgba(255, 60, 20, .5), 0 1px 0 #000; }
   main { padding: 20px 24px 24px; max-width: 1440px; margin: 0 auto; }
   .panel.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 0 24px; align-items: start; }
   .panel.screenshots { display: grid; grid-template-columns: 1fr 340px; gap: 24px; align-items: start; }
@@ -247,9 +248,8 @@
   }
 
   function render(st) {
-    $("#notice").textContent = !st.gameDir ? "Choose your WoW folder to get started."
-      : !st.found ? "No Brag settings found yet. Log in to WoW once with Brag installed."
-      : st.paused ? "Posting is paused: new screenshots are skipped. Resume from the tray icon." : "";
+    $("#notice").textContent = st.status.kind === "ok" ? "" : st.status.message;  // the tray shows the same
+    $("#notice").className = st.status.kind;
     $("#gameDir").textContent = st.gameDir || "Not chosen yet: pick the _forever_ folder in your WoW install.";
     $("#choose").textContent = st.gameDir ? "Change…" : "Choose folder…";
 
@@ -257,7 +257,7 @@
     log.replaceChildren();
     if (!st.log.length) log.append(el("li", { className: "empty" }, "Nothing yet."));
     for (const l of st.log) {
-      const li = el("li", { className: l.text.split(/[ :]/)[0] });
+      const li = el("li", { className: l.kind || "" });
       li.append(el("time", {}, new Date(l.time * 1000).toLocaleTimeString()), l.text);
       log.append(li);
     }
@@ -270,7 +270,7 @@
       const card = el("a", { href: url, target: "_blank", rel: "noopener", className: "shot" });
       const body = el("div");
       const meta = el("p", { className: "meta" });
-      meta.append(el("span", {}, fmt(s.time)), el("span", { className: s.status.split(/[ :]/)[0] }, s.status));
+      meta.append(el("span", {}, fmt(s.time)), el("span", { className: s.kind }, s.status));
       body.append(captionEl(s.caption), meta);
       card.append(el("img", { src: url, loading: "lazy", alt: s.caption || s.name }), body);
       shots.append(card);
@@ -297,7 +297,7 @@
       deleteWasOn = st.companion.deleteShots;
       if (!tabChosen && !(st.gameDir && st.found && st.settings.webhook)) showTab("settings");
     }
-    const key = JSON.stringify([st.found, st.gameDir, st.paused, st.shots, st.history, st.log]);
+    const key = JSON.stringify([st.status, st.gameDir, st.shots, st.history, st.log]);
     if (key !== last) { last = key; render(st); }  // only re-render when something changed, so images don't flicker
   }
 

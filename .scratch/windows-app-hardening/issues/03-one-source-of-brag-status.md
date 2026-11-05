@@ -14,10 +14,10 @@ Source: Standards axis of the code review, smells 1, 2 and 3.
 
 **Blocked by:** 02 (The watcher never dies silently)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Post results have a kind and a reason; nothing parses the kind back out of the text
-- [ ] An existing post log written before this change still shows the right status and colour for old screenshots
-- [ ] One status function drives both the tray (colour + tooltip) and the page's notice; tests cover each state and the priority order
-- [ ] Screenshot tiles and log lines are still coloured posted / failed / skipped
-- [ ] All existing tests pass
+- [x] Post results have a kind and a reason; nothing parses the kind back out of the text
+- [x] An existing post log written before this change still shows the right status and colour for old screenshots
+- [x] One status function drives both the tray (colour + tooltip) and the page's notice; tests cover each state and the priority order
+- [x] Screenshot tiles and log lines are still coloured posted / failed / skipped
+- [x] All existing tests pass

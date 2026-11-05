@@ -21,7 +21,6 @@ COLORS = {"ok": (232, 185, 84), "idle": (128, 120, 108), "failed": (239, 107, 91
 window = icon = None
 ICONS = {}  # tray icon image per color name, made at startup
 icon_color = None  # the color name the tray icon shows now
-last_failure = None  # why the last post failed, until a post works or you open the window
 warned_no_webhook = False  # the "no webhook yet" notification shows once per session
 quitting = False
 
@@ -122,20 +121,11 @@ def make_icon(color, size=64):
     return img
 
 
-def status():
-    """(icon color, tooltip) for what Brag is doing right now."""
-    if not watch.GAME_DIR:
-        return "idle", "Brag: choose your WoW folder"
-    if watch.PAUSED.is_set():
-        return "idle", "Brag: paused"
-    if last_failure:
-        return "failed", "Brag: " + last_failure[:110]  # Windows cuts tooltips at 127 characters
-    db, _ = watch.load_saved(watch.GAME_DIR)
-    if not watch.WEBHOOK.match(db.get("webhook", "")):
-        return "idle", "Brag: no Discord webhook yet (/brag in WoW)"
-    if not db.get("enabled", True):
-        return "idle", "Brag: turned off in WoW (/brag)"
-    return "ok", "Brag: watching for screenshots"
+def tray_state():
+    """(icon color, tooltip) from the companion's status, which the page shows too."""
+    kind, message = watch.status()
+    color = kind if kind in ("ok", "failed") else "idle"
+    return color, ("Brag: " + message)[:127]  # Windows cuts tooltips at 127 characters
 
 
 def refresh():
@@ -143,7 +133,7 @@ def refresh():
     if not icon:
         return
     try:
-        color, title = status()
+        color, title = tray_state()
     except Exception as e:  # a half-written SavedVariables file: try again next time
         watch.say(f"Status check failed: {e}")
         return
@@ -160,22 +150,16 @@ def keep_refreshing():
 
 
 def on_result(name, result, text):
-    global last_failure, warned_no_webhook
-    if result.startswith("failed"):
-        last_failure = result.removeprefix("failed: ")
-        icon.notify(f"{text or name}\n{last_failure}"[:250], "Brag couldn't post a screenshot")
-    elif result.startswith("posted"):
-        last_failure = None
-    elif result == "skipped: no webhook set" and not warned_no_webhook:
+    global warned_no_webhook
+    if result.kind == "failed":
+        icon.notify(f"{text or name}\n{result.reason}"[:250], "Brag couldn't post a screenshot")
+    elif result == watch.NO_WEBHOOK and not warned_no_webhook:
         warned_no_webhook = True  # once per session: every screenshot would say the same
         icon.notify("Type /brag in WoW, paste your Discord webhook, then Save & reload.", "Brag has no webhook yet")
     refresh()
 
 
 def show(*_):
-    global last_failure
-    last_failure = None  # you've seen it now
-    refresh()
     if window:
         window.show()
         window.restore()

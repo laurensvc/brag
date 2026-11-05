@@ -47,6 +47,31 @@ PAUSED = threading.Event()  # new screenshots are skipped (not posted later) whi
 LINES = collections.deque(maxlen=200)  # recent output, for the page's Log card
 LISTENERS = []  # called with (name, status, plain caption) after each screenshot
 ON_SHOW = None  # POST /api/show calls this: a second Brag.exe asks the first to show its window
+LAST_FAILURE = None  # why the last post failed, until a post works
+
+
+@dataclasses.dataclass(frozen=True)
+class Result:
+    """What happened to one screenshot. kind: "posted", "failed" or "skipped"; reason: how or why."""
+    kind: str
+    reason: str = ""
+
+    def __str__(self):  # how it reads in the log and on the page: "posted after 1 retry", "failed: …"
+        return f"posted {self.reason}".strip() if self.kind == "posted" else f"{self.kind}: {self.reason}"
+
+    @classmethod
+    def from_text(cls, text):
+        """Read a status an older Brag wrote to the post log, before results had a kind."""
+        text = str(text or "")
+        kind, sep, reason = text.partition(":")
+        if sep and kind in ("failed", "skipped"):
+            return cls(kind, reason.strip())
+        if text.startswith("posted"):
+            return cls("posted", text.removeprefix("posted").strip())
+        return cls("skipped", text)
+
+
+NO_WEBHOOK = Result("skipped", "no webhook set")
 
 
 def screenshots_dir(game_dir):
@@ -79,9 +104,9 @@ def tell_listeners(name, status, text):
             report_error(f"{getattr(fn, '__name__', 'listener')} failed", e)
 
 
-def say(text):
-    """Report what the companion does: console, the page's Log card and TEXT_LOG."""
-    LINES.append({"time": time.time(), "text": text})
+def say(text, kind=None):
+    """Report what the companion does: console, the page's Log tab and TEXT_LOG. kind colors it on the page."""
+    LINES.append({"time": time.time(), "text": text, "kind": kind})
     print(text)
     if TEXT_LOG:
         try:
@@ -326,7 +351,7 @@ def post(path, text, webhook, retries, run=subprocess.run, sleep=time.sleep):
             body, _, code = r.stdout.rpartition("\n")
             code = int(code) if code.strip().isdigit() else 0
             if 200 <= code < 300:
-                return "posted" + (f" after {attempt} {'retry' if attempt == 1 else 'retries'}" if attempt else "")
+                return Result("posted", f"after {attempt} {'retry' if attempt == 1 else 'retries'}" if attempt else "")
             if code == 429:
                 try:
                     wait = float(json.loads(body)["retry_after"])
@@ -335,16 +360,17 @@ def post(path, text, webhook, retries, run=subprocess.run, sleep=time.sleep):
             elif code == 0 or code >= 500:
                 wait = 2 ** (attempt + 1)  # 2, 4, 8 seconds
             else:
-                return "failed: " + failure(code, body, r.stderr)  # retrying won't fix a bad webhook or a huge file
+                return Result("failed", failure(code, body, r.stderr))  # retrying won't fix a bad webhook or a huge file
             if attempt < retries:
                 sleep(min(wait, 60))
         tried = f" after {retries} {'retry' if retries == 1 else 'retries'}" if retries else ""
-        return "failed: " + failure(code, body, r.stderr) + tried
+        return Result("failed", failure(code, body, r.stderr) + tried)
 
 
-def log(name, status, text=""):
+def log(name, result, text=""):
+    entry = {"name": name, "kind": result.kind, "status": str(result), "caption": text, "time": time.time()}
     with LOG_LOCK, open(LOG, "a", encoding="utf-8") as f:
-        f.write(json.dumps({"name": name, "status": status, "caption": text, "time": time.time()}) + "\n")
+        f.write(json.dumps(entry) + "\n")
 
 
 def statuses():
@@ -354,6 +380,7 @@ def statuses():
             for line in f:
                 try:
                     e = json.loads(line)
+                    e.setdefault("kind", Result.from_text(e.get("status")).kind)  # written by an older Brag
                     out[e["name"]] = e
                 except (ValueError, KeyError, TypeError):
                     pass
@@ -396,18 +423,18 @@ def cleanup(game_dir, cfg, now=None):
 
 
 def handle(game_dir, name):
-    """Read, caption and post one new screenshot. Returns (status, plain caption)."""
+    """Read, caption and post one new screenshot. Returns (Result, plain caption)."""
     img = open_when_ready(os.path.join(screenshots_dir(game_dir), name))
     payload, crop = read_strip(img) if img else (None, 0)
     db, _ = load_saved(game_dir)  # re-read each time so settings changes apply
     cfg = load_companion()
     webhook = db.get("webhook", "")
     if not img:
-        status = "failed: couldn't read the screenshot"
+        status = Result("failed", "couldn't read the screenshot")
     elif not db.get("enabled", True):
-        status = "skipped: Brag disabled"
+        status = Result("skipped", "Brag disabled")
     elif not WEBHOOK.match(webhook):
-        status = "skipped: no webhook set"
+        status = NO_WEBHOOK
     else:
         if crop:
             img = img.crop((0, crop, img.width, img.height))  # remove the data strip
@@ -447,16 +474,26 @@ def watch_once(watching):
         if not name.lower().endswith(IMAGES):
             continue
         if PAUSED.is_set():
-            status, text = "skipped: paused", ""
+            result, text = Result("skipped", "paused"), ""
         else:
             try:
-                status, text = handle(game_dir, name)
+                result, text = handle(game_dir, name)
             except Exception as e:  # keep watching whatever happens to one file
-                status, text = f"failed: {e}", ""
-        log(name, status, text)
-        say(f"{status}: {name}" + (f" ({text})" if text else ""))
-        tell_listeners(name, status, text)
+                result, text = Result("failed", str(e)), ""
+        log(name, result, text)
+        say(f"{result}: {name}" + (f" ({text})" if text else ""), result.kind)
+        remember(result)
+        tell_listeners(name, result, text)
     return watching
+
+
+def remember(result):
+    """Keep the last failure for status(), until a post works."""
+    global LAST_FAILURE
+    if result.kind == "failed":
+        LAST_FAILURE = result.reason
+    elif result.kind == "posted":
+        LAST_FAILURE = None
 
 
 def guarded_pass(watching, error):
@@ -471,7 +508,9 @@ def guarded_pass(watching, error):
     except Exception as e:  # a bug or bad data: keep watching, and make it visible
         if repr(e) != error:
             report_error("Watcher error", e)
-            tell_listeners("Brag", f"failed: watcher error: {e}", "")
+            result = Result("failed", f"watcher error: {e}")
+            remember(result)
+            tell_listeners("Brag", result, "")
         return watching, repr(e)
 
 
@@ -482,10 +521,31 @@ def watch():
         time.sleep(2)
 
 
+def status():
+    """What state Brag is in, as (kind, message), the most important first. The tray icon and the page both show
+    this. kind: "setup" (something to set up), "paused", "failed" (the last post), "off" or "ok"."""
+    if not GAME_DIR:
+        return "setup", "Choose your WoW folder to get started."
+    if not settings_file(GAME_DIR):
+        return "setup", "No Brag settings found yet. Log in to WoW once with Brag installed."
+    if PAUSED.is_set():
+        return "paused", "Posting is paused: new screenshots are skipped. Resume from the tray icon."
+    if LAST_FAILURE:
+        return "failed", f"Last post failed: {LAST_FAILURE}"
+    db, _ = load_saved(GAME_DIR)
+    if not WEBHOOK.match(db.get("webhook", "")):
+        return "setup", "No Discord webhook yet: paste it under Settings, or use /brag in WoW."
+    if not db.get("enabled", True):
+        return "off", "Brag is turned off: tick Enabled under Settings, or use /brag in WoW."
+    return "ok", "Watching for screenshots."
+
+
 # --- Local page ---
 
 def state(game_dir):
-    app = {"gameDir": game_dir or "", "paused": PAUSED.is_set(), "log": list(LINES)[::-1]}
+    kind, message = status()
+    app = {"gameDir": game_dir or "", "paused": PAUSED.is_set(), "log": list(LINES)[::-1],
+           "status": {"kind": kind, "message": message}}
     if not game_dir:
         return {"found": False, "settings": dict(DEFAULTS), "companion": load_companion(), "shots": [], "history": [], **app}
     db, history = load_saved(game_dir)
@@ -508,8 +568,8 @@ def state(game_dir):
         "found": settings_file(game_dir) is not None,
         "settings": {**DEFAULTS, **{k: db[k] for k in DEFAULTS if k in db}},
         "companion": load_companion(),
-        "shots": [{"name": n, "time": times[n], "status": done.get(n, {}).get("status", ""), "caption": shot_caption(n)}
-                  for n in newest],
+        "shots": [{"name": n, "time": times[n], "status": done.get(n, {}).get("status", ""),
+                   "kind": done.get(n, {}).get("kind", ""), "caption": shot_caption(n)} for n in newest],
         "history": history[::-1][:100],
         **app,
     }

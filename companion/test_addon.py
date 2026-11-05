@@ -59,14 +59,14 @@ with tempfile.TemporaryDirectory() as d:
     # the companion posts it with the strip cropped off and the caption attached
     wow.logout()
     posted = []
-    real_post, watch.post = watch.post, lambda path, text, hook, retries: posted.append((Image.open(path).copy(), text, hook)) or "posted"
+    real_post, watch.post = watch.post, lambda path, text, hook, retries: posted.append((Image.open(path).copy(), text, hook)) or watch.Result("posted")
     watch.CONFIG = os.path.join(d, "cfg.json")
     try:
         status, plain = watch.handle(d, os.path.basename(wow.taken[0]))
     finally:
         watch.post = real_post
     img, sent, hook = posted[0]
-    assert status == "posted" and hook == HOOK and sent.startswith("✅ Brag test from **Thrall**")
+    assert status == watch.Result("posted") and hook == HOOK and sent.startswith("✅ Brag test from **Thrall**")
     assert img.height < 1080 and read_strip(img) == (None, 0)
 
     # history survives logout, and turning Brag off stops screenshots

@@ -129,16 +129,16 @@ def fake_curl(*responses):
 
 
 run, calls, sleeps = fake_curl((429, '{"retry_after": 1.5}'), (200, "{}"))
-assert post("x.jpg", "hi", HOOK, 3, run, sleeps.append) == "posted after 1 retry" and sleeps == [1.5]
+assert str(post("x.jpg", "hi", HOOK, 3, run, sleeps.append)) == "posted after 1 retry" and sleeps == [1.5]
 run, calls, sleeps = fake_curl(*[(502, "")] * 4)
-assert post("x.jpg", "hi", HOOK, 3, run, sleeps.append) == "failed: Discord had a problem (HTTP 502) after 3 retries"
+assert post("x.jpg", "hi", HOOK, 3, run, sleeps.append) == watch.Result("failed", "Discord had a problem (HTTP 502) after 3 retries")
 assert sleeps == [2, 4, 8] and len(calls) == 4
 run, calls, sleeps = fake_curl((0, ""), (204, ""))
-assert post("x.jpg", "hi", HOOK, 1, run, sleeps.append) == "posted after 1 retry"
+assert post("x.jpg", "hi", HOOK, 1, run, sleeps.append) == watch.Result("posted", "after 1 retry")
 run, calls, sleeps = fake_curl((404, '{"message": "Unknown Webhook"}'))
-assert post("x.jpg", "hi", HOOK, 3, run, sleeps.append) == "failed: webhook was deleted (HTTP 404)" and not sleeps
+assert str(post("x.jpg", "hi", HOOK, 3, run, sleeps.append)) == "failed: webhook was deleted (HTTP 404)" and not sleeps
 run, calls, sleeps = fake_curl((0, ""))
-assert post("x.jpg", "hi", HOOK, 0, run, sleeps.append) == "failed: curl: (7) Failed to connect" and len(calls) == 1
+assert str(post("x.jpg", "hi", HOOK, 0, run, sleeps.append)) == "failed: curl: (7) Failed to connect" and len(calls) == 1
 
 # real curl against a local server: the caption (emoji, accents) and the file arrive intact
 received = {}
@@ -156,7 +156,7 @@ with tempfile.TemporaryDirectory() as d:
     noisy(64, 64).save(shot)
     status = post(shot, caption(QUEST), f"http://127.0.0.1:{server.server_port}/hook", 0)
 server.shutdown()
-assert status == "posted", status
+assert status == watch.Result("posted"), status
 body = received["body"]
 sent = json.loads(body.split(b'name="payload_json"')[1].split(b"\r\n\r\n", 1)[1].split(b"\r\n--")[0])
 assert sent == {"content": caption(QUEST), "allowed_mentions": {"parse": []}}, sent
@@ -174,11 +174,11 @@ with tempfile.TemporaryDirectory() as game:
     jpeg(draw_strip(noisy(1920, 1080), LOOT), 30).save(shot)
     watch.LOG, watch.CONFIG = os.path.join(game, "log.jsonl"), os.path.join(game, "cfg.json")
     posted = []
-    real_post, watch.post = watch.post, lambda path, text, hook, retries: posted.append((Image.open(path).copy(), text, hook, retries)) or "posted"
+    real_post, watch.post = watch.post, lambda path, text, hook, retries: posted.append((Image.open(path).copy(), text, hook, retries)) or watch.Result("posted")
     status, text = watch.handle(game, "WoWScrnShot_1.jpg")
     watch.post = real_post
     img, sent, hook, retries = posted[0]
-    assert (status, text, sent, hook, retries) == ("posted", caption(LOOT, md=False), caption(LOOT), HOOK, 3)
+    assert (status, text, sent, hook, retries) == (watch.Result("posted"), caption(LOOT, md=False), caption(LOOT), HOOK, 3)
     assert img.width == 1920 and 1000 < img.height < 1080 and read_strip(img) == (None, 0)  # strip cropped off
 
     with open(watch.CONFIG, "w") as f:
@@ -196,7 +196,7 @@ with tempfile.TemporaryDirectory() as game:
     noisy(8, 8).save(old)
     os.utime(old, (now - 8 * 86400, now - 8 * 86400))
     assert cleanup(game, COMPANION_DEFAULTS, now) == 0 and os.path.exists(old)  # screenshots kept by default
-    assert list(watch.statuses()) == ["new"]
+    assert list(watch.statuses()) == ["new"] and watch.statuses()["new"]["kind"] == "posted"  # an older entry
     assert cleanup(game, {**COMPANION_DEFAULTS, "deleteShots": True}, now) == 1
     assert sorted(os.listdir(os.path.join(game, "Screenshots"))) == ["WoWScrnShot_1.jpg"]
 
@@ -208,7 +208,7 @@ assert watch.open_when_ready("missing.jpg", timeout=1, sleep=lambda s: None) is 
 with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
     watch.LOG, watch.CONFIG = os.path.join(a, "log.jsonl"), os.path.join(a, "cfg.json")
     results, handled = [], []
-    real_handle, watch.handle = watch.handle, lambda game, name: handled.append((game, name)) or ("posted", "cap")
+    real_handle, watch.handle = watch.handle, lambda game, name: handled.append((game, name)) or (watch.Result("posted"), "cap")
     watch.LISTENERS.append(lambda *r: results.append(r))
     try:
         watch.GAME_DIR = None
@@ -224,15 +224,16 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         with open(os.path.join(w.folder, "notes.txt"), "w") as f:
             f.write("x")
         w = watch.watch_once(w)
-        assert handled == [(a, "one.jpg")] and results == [("one.jpg", "posted", "cap")]
+        assert handled == [(a, "one.jpg")] and results == [("one.jpg", watch.Result("posted"), "cap")]
 
         watch.PAUSED.set()
         noisy(8, 8).save(os.path.join(w.folder, "two.jpg"))
         w = watch.watch_once(w)
         watch.PAUSED.clear()
         w = watch.watch_once(w)  # skipped while paused, and not posted after resuming
-        assert len(handled) == 1 and results[-1] == ("two.jpg", "skipped: paused", "")
-        assert watch.statuses()["two.jpg"]["status"] == "skipped: paused"
+        assert len(handled) == 1 and results[-1] == ("two.jpg", watch.Result("skipped", "paused"), "")
+        assert watch.statuses()["two.jpg"]["status"] == "skipped: paused" and watch.statuses()["two.jpg"]["kind"] == "skipped"
+        assert watch.LINES[-1]["kind"] == "skipped"
 
         os.makedirs(os.path.join(b, "Screenshots"))
         noisy(8, 8).save(os.path.join(b, "Screenshots", "old.jpg"))  # already there when we switch: not posted
@@ -259,7 +260,8 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         try:
             w.cleaned = 0
             w, error = watch.guarded_pass(w, None)
-            assert error and results[-1] == ("Brag", "failed: watcher error: division by zero", "")
+            assert error and results[-1] == ("Brag", watch.Result("failed", "watcher error: division by zero"), "")
+            assert watch.LAST_FAILURE == "watcher error: division by zero"  # the tray turns red
             n = len(results)
             w.cleaned = 0
             w, error = watch.guarded_pass(w, error)  # same error again: not reported again
@@ -269,6 +271,7 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         noisy(8, 8).save(os.path.join(b, "Screenshots", "later.jpg"))
         w, error = watch.guarded_pass(w, error)
         assert error is None and handled[-1] == (b, "later.jpg")
+        assert watch.LAST_FAILURE is None  # a post worked again
 
         # switching the WoW folder mid-pass: this pass finishes in the old folder, the next one moves
         for n in ("x1.jpg", "x2.jpg"):
@@ -276,10 +279,10 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         def switch(game, name):
             watch.GAME_DIR = a
             handled.append((game, name))
-            return "posted", ""
+            return watch.Result("posted"), ""
         watch.handle = switch
         w = watch.watch_once(w)
-        assert handled[-2:] == [(b, "x1.jpg"), (b, "x2.jpg")] and results[-1][1] == "posted"
+        assert handled[-2:] == [(b, "x1.jpg"), (b, "x2.jpg")] and results[-1][1].kind == "posted"
         w = watch.watch_once(w)
         assert w.folder == os.path.join(a, "Screenshots")
     finally:
@@ -317,5 +320,39 @@ for bad in ["/assets/CREDITS.md", "/assets/../watch.py", "/assets/..%2Fwatch.py"
     except urllib.error.HTTPError as e:
         assert e.code == 404, (bad, e.code)
 server.shutdown()
+
+# results written by an older Brag still read right
+R = watch.Result
+assert R.from_text("posted") == R("posted") and R.from_text("posted after 2 retries") == R("posted", "after 2 retries")
+assert R.from_text("failed: webhook was deleted (HTTP 404)") == R("failed", "webhook was deleted (HTTP 404)")
+assert R.from_text("skipped: paused") == R("skipped", "paused") and R.from_text("").kind == "skipped"
+assert str(R("posted")) == "posted" and str(R("skipped", "paused")) == "skipped: paused"
+
+# one status for the tray and the page, the most important first
+with tempfile.TemporaryDirectory() as game:
+    watch.GAME_DIR, watch.LAST_FAILURE = None, None
+    assert watch.status()[0] == "setup" and "WoW folder" in watch.status()[1]
+    watch.GAME_DIR = game
+    assert watch.status()[0] == "setup" and "No Brag settings" in watch.status()[1]
+    saved = os.path.join(game, "WTF", "Account", "ME", "SavedVariables")
+    os.makedirs(saved)
+    with open(os.path.join(saved, "Brag.lua"), "w") as f:
+        f.write('BragDB = {\n["enabled"] = false,\n}\n')
+    assert watch.status()[0] == "setup" and "webhook" in watch.status()[1]
+    with open(os.path.join(saved, "Brag.lua"), "w") as f:
+        f.write(f'BragDB = {{\n["webhook"] = "{HOOK}",\n["enabled"] = false,\n}}\n')
+    assert watch.status()[0] == "off"
+    with open(os.path.join(saved, "Brag.lua"), "w") as f:
+        f.write(f'BragDB = {{\n["webhook"] = "{HOOK}",\n["enabled"] = true,\n}}\n')
+    assert watch.status() == ("ok", "Watching for screenshots.")
+    watch.remember(R("failed", "webhook was deleted (HTTP 404)"))
+    assert watch.status() == ("failed", "Last post failed: webhook was deleted (HTTP 404)")
+    watch.PAUSED.set()
+    assert watch.status()[0] == "paused"  # pausing outranks the last failure
+    watch.PAUSED.clear()
+    assert watch.state(game)["status"]["kind"] == "failed"  # the page gets the same
+    watch.remember(R("posted"))
+    assert watch.status()[0] == "ok"
+    watch.GAME_DIR = None
 
 print("ok")
