@@ -4,11 +4,12 @@
   py companion\\desktop.py          run from source (py -m pip install pillow pystray pywebview)
   py companion\\desktop.py --tray   start in the tray, window hidden (what "Start with Windows" runs)
   add --browser                     show the page in your browser instead of a window (automatic without WebView2)
+  add --import "<folder>"           copy posting settings and post history from the command-line companion's folder
 
 Closing the window keeps Brag running in the tray; Quit in the tray menu stops it. Settings, the post log and
 brag.log live in %APPDATA%\\Brag. windows\\build.ps1 turns this into Brag.exe and BragSetup.exe.
 """
-import ctypes, json, os, string, sys, threading, time, urllib.request, webbrowser, winreg
+import ctypes, json, os, shutil, string, sys, threading, time, urllib.request, webbrowser, winreg
 from PIL import Image, ImageDraw, ImageFont
 import watch
 
@@ -70,6 +71,28 @@ def use_folder(path):
         return NOT_WOW
     set_game_dir(found)
     return None
+
+
+def import_cli_settings(folders, asked=False):
+    """Copy the command-line companion's posting settings and post log (it keeps them next to watch.py), so they
+    carry over to the app. Only copies, never over the app's own, and on its own only on the first start;
+    asked=True (--import) looks again. Returns the files copied."""
+    if load_app().get("importChecked") and not asked:
+        return []
+    watch.write_atomic(APP_CONFIG, json.dumps({**load_app(), "importChecked": True}, indent=2))
+    copied = []
+    for name, target in (("brag-companion.json", watch.CONFIG), ("brag-log.jsonl", watch.LOG)):
+        source = next((os.path.join(f, name) for f in folders if os.path.isfile(os.path.join(f, name))), None)
+        if not source or os.path.abspath(source) == os.path.abspath(target):
+            continue
+        if os.path.exists(target):
+            if asked:
+                watch.say(f"Not imported {source}: Brag already has its own {name}")
+            continue
+        shutil.copy2(source, target)  # a bad settings file is fine: Brag falls back to the defaults
+        copied.append(source)
+        watch.say(f"Imported {source}")
+    return copied
 
 
 def set_game_dir(path):
@@ -284,6 +307,8 @@ def main():
     if os.path.exists(watch.TEXT_LOG) and os.path.getsize(watch.TEXT_LOG) > 1_000_000:
         os.replace(watch.TEXT_LOG, watch.TEXT_LOG + ".old")  # keep brag.log small
     log_crashes()
+    asked = sys.argv[sys.argv.index("--import") + 1:][:1] if "--import" in sys.argv else []
+    import_cli_settings(asked or [watch.HERE], asked=bool(asked))  # HERE: next to watch.py when run from source
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     mutex = kernel32.CreateMutexW(None, False, MUTEX)  # held until Brag exits

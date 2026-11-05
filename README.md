@@ -26,7 +26,8 @@ So there are two parts:
    - the icon is gold while it works, grey when paused or not set up yet (hover it to see why), and red with a
      Windows notification when a post fails.
 
-   Its settings and log live in `%APPDATA%\Brag`.
+   Its settings and log live in `%APPDATA%\Brag`. Used the command-line companion before? Run
+   `Brag.exe --import "<the companion folder>"` once to bring over its posting settings and post history.
 
    The window uses Microsoft Edge WebView2, which Windows 11 and up-to-date Windows 10 already have. Without it,
    Brag says so once and shows its page in your browser instead (the tray works the same; type or paste your

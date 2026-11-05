@@ -13,9 +13,9 @@ Source: Spec axis of the code review, finding (a), settings migration.
 
 **Blocked by:** 08 (The first run asks for the WoW folder)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Test: old settings and post log present, app data empty: both are imported and a Log line says so
-- [ ] Test: app data already has settings: nothing is imported or overwritten
-- [ ] Test: corrupt old settings: defaults are used and the run doesn't fail
-- [ ] The originals are left untouched
+- [x] Test: old settings and post log present, app data empty: both are imported and a Log line says so
+- [x] Test: app data already has settings: nothing is imported or overwritten
+- [x] Test: corrupt old settings: defaults are used and the run doesn't fail
+- [x] The originals are left untouched

@@ -207,6 +207,7 @@ assert watch.open_when_ready("missing.jpg", timeout=1, sleep=lambda s: None) is 
 
 with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
     watch.LOG, watch.CONFIG = os.path.join(a, "log.jsonl"), os.path.join(a, "cfg.json")
+    watch.TEXT_LOG = os.path.join(a, "brag.log")  # like the desktop app: tracebacks go here, not the console
     results, handled = [], []
     real_handle, watch.handle = watch.handle, lambda game, name: handled.append((game, name)) or (watch.Result("posted"), "cap")
     watch.LISTENERS.append(lambda *r: results.append(r))
@@ -271,6 +272,9 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         noisy(8, 8).save(os.path.join(b, "Screenshots", "later.jpg"))
         w, error = watch.guarded_pass(w, error)
         assert error is None and handled[-1] == (b, "later.jpg")
+        with open(watch.TEXT_LOG, encoding="utf-8") as f:
+            detail = f.read()
+        assert "Traceback" in detail and "ZeroDivisionError" in detail and "tray went away" in detail
         assert watch.LAST_FAILURE is None  # a post worked again
 
         # switching the WoW folder mid-pass: this pass finishes in the old folder, the next one moves
@@ -286,7 +290,7 @@ with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
         w = watch.watch_once(w)
         assert w.folder == os.path.join(a, "Screenshots")
     finally:
-        watch.handle, watch.GAME_DIR = real_handle, None
+        watch.handle, watch.GAME_DIR, watch.TEXT_LOG = real_handle, None, None
         watch.LISTENERS.clear()
 
 # the page server: a second Brag asks the first to show its window; other sites can't

@@ -62,4 +62,34 @@ with tempfile.TemporaryDirectory() as d:
     finally:
         desktop.APP_CONFIG, desktop.message = real
 
+# a command-line companion's posting settings and post log carry over to the app, once, without overwriting
+with tempfile.TemporaryDirectory() as cli, tempfile.TemporaryDirectory() as app:
+    real = desktop.APP_CONFIG, watch.CONFIG, watch.LOG
+    desktop.APP_CONFIG = os.path.join(app, "brag-app.json")
+    watch.CONFIG, watch.LOG = os.path.join(app, "brag-companion.json"), os.path.join(app, "brag-log.jsonl")
+    try:
+        with open(os.path.join(cli, "brag-companion.json"), "w") as f:
+            f.write('{"caption": false, "retries": 1, "maxHeight": 720, "jpegQuality": 75, "keepDays": 30, "deleteShots": false}')
+        with open(os.path.join(cli, "brag-log.jsonl"), "w") as f:
+            f.write('{"name": "a.jpg", "status": "posted", "caption": "", "time": 1}\n')
+        assert len(desktop.import_cli_settings([cli])) == 2
+        assert watch.load_companion()["keepDays"] == 30 and watch.statuses()["a.jpg"]["kind"] == "posted"
+        assert any(line["text"].startswith("Imported ") for line in watch.LINES)
+        assert os.path.exists(os.path.join(cli, "brag-companion.json"))  # copied, not moved
+
+        with open(os.path.join(cli, "brag-companion.json"), "w") as f:
+            f.write('{"keepDays": 99}')
+        assert desktop.import_cli_settings([cli]) == []  # only on the first start
+        assert desktop.import_cli_settings([cli], asked=True) == []  # never over the app's own settings
+        assert watch.load_companion()["keepDays"] == 30
+
+        os.remove(watch.CONFIG)
+        with open(os.path.join(cli, "brag-companion.json"), "w") as f:
+            f.write("{not json")
+        assert len(desktop.import_cli_settings([cli], asked=True)) == 1
+        assert watch.load_companion() == watch.COMPANION_DEFAULTS  # a corrupt file: defaults, no crash
+        assert desktop.import_cli_settings([os.path.join(cli, "missing")], asked=True) == []
+    finally:
+        desktop.APP_CONFIG, watch.CONFIG, watch.LOG = real
+
 print("ok")
