@@ -81,12 +81,20 @@ local function nextShot()
   end)
 end
 
+-- WoW Forever characters have a first and a last name: UnitName's second value is the surname there
+-- (it's the realm elsewhere, and nil for your own character).
+local function playerName()
+  local first, last = UnitName("player")
+  if last and last ~= "" then return first .. " " .. last end
+  return first
+end
+
 -- kind: level | quest | loot | boss | death | test. detail: quest title, item name or boss name.
 local function brag(kind, text, detail, quality, level)
   tinsert(BragHistory, { time = time(), text = text }) -- the companion app shows this history
   if #BragHistory > 500 then tremove(BragHistory, 1) end -- keep the saved file small
   local payload = table.concat({
-    "1", kind, clean(UnitName("player")), clean((UnitClass("player"))), level or UnitLevel("player"),
+    "1", kind, clean(playerName()), clean((UnitClass("player"))), level or UnitLevel("player"),
     clean(GetRealZoneText()), clean(detail):sub(1, 120), quality or "",
   }, "\t"):sub(1, 250) -- the length has to fit in one byte
   tinsert(queue, { text = text, payload = payload })

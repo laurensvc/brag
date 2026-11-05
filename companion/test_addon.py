@@ -19,7 +19,7 @@ def captions(wow):
 # Every event, at several screen sizes and UI scales: the strip decodes to the right caption.
 for size, scale, quality in [((1920, 1080), 1.0, 30), ((2560, 1440), 0.71, 30), ((3840, 2160), 1.15, 20), ((1366, 768), 0.9, 15)]:
     with tempfile.TemporaryDirectory() as d:
-        wow = FakeWoW(d, size, scale, quality, {"name": "Jaïna", "zone": "Theramore Isle"})
+        wow = FakeWoW(d, size, scale, quality, {"name": "Jaïna", "surname": "Proudmoore", "zone": "Theramore Isle"})
         wow.turn_in('The "Missing" Diplomat\tpart 1', levels_up=True)  # quest + ding: two screenshots, in order
         wow.loot("Thunderfury, Blessed Blade of the Windseeker", 5)
         wow.loot("Krol Blade", 4, cached=False)  # not in the item cache: quality from the link color
@@ -30,13 +30,13 @@ for size, scale, quality in [((1920, 1080), 1.0, 30), ((2560, 1440), 0.71, 30), 
         wow.die()
         wow.print_screen()  # the player's own screenshot: no strip
         assert captions(wow) == [
-            "📜 Jaïna completed The \"Missing\" Diplomat part 1 · Level 41 Shaman · Theramore Isle",
-            "🎉 Jaïna reached level 42! · Shaman · Theramore Isle",
-            "💎 Jaïna looted [Thunderfury, Blessed Blade of the Windseeker] (Legendary) · Level 42 Shaman · Theramore Isle",
-            "💎 Jaïna looted [Krol Blade] (Epic) · Level 42 Shaman · Theramore Isle",
-            "💎 Jaïna looted [Lucky Charm] (Epic) · Level 42 Shaman · Theramore Isle",
-            "⚔️ Jaïna defeated Ragnaros! · Level 42 Shaman · Theramore Isle",
-            "💀 Jaïna died · Level 42 Shaman · Theramore Isle",
+            "📜 Jaïna Proudmoore completed The \"Missing\" Diplomat part 1 · Level 41 Shaman · Theramore Isle",
+            "🎉 Jaïna Proudmoore reached level 42! · Shaman · Theramore Isle",
+            "💎 Jaïna Proudmoore looted [Thunderfury, Blessed Blade of the Windseeker] (Legendary) · Level 42 Shaman · Theramore Isle",
+            "💎 Jaïna Proudmoore looted [Krol Blade] (Epic) · Level 42 Shaman · Theramore Isle",
+            "💎 Jaïna Proudmoore looted [Lucky Charm] (Epic) · Level 42 Shaman · Theramore Isle",
+            "⚔️ Jaïna Proudmoore defeated Ragnaros! · Level 42 Shaman · Theramore Isle",
+            "💀 Jaïna Proudmoore died · Level 42 Shaman · Theramore Isle",
             "",
         ], (size, scale, captions(wow))
 

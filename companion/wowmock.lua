@@ -1,6 +1,6 @@
 -- Just enough of the WoW API to run Brag.lua outside the game; fakewow.py drives it.
 -- Frames only have the methods Brag uses, so calling anything else errors, as a typo would in game.
--- HOST (set by fakewow.py): screen = {w, h}, uiScale, player = {name, class, level, zone},
+-- HOST (set by fakewow.py): screen = {w, h}, uiScale, player = {name, surname, class, level, zone},
 -- itemCache = {[itemID] = {name, quality}} (the item cache), screenshot(), time().
 
 local timers, now = {}, 0
@@ -111,7 +111,7 @@ tinsert, tremove = table.insert, table.remove
 function strtrim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
 function time() return math.floor(HOST.time()) end
 function GetPhysicalScreenSize() return HOST.screen.w, HOST.screen.h end
-function UnitName() return HOST.player.name end
+function UnitName() return HOST.player.name, HOST.player.surname end  -- Forever: the surname
 function UnitClass() return HOST.player.class, HOST.player.class:upper(), 7 end
 function UnitLevel() return HOST.player.level end
 function GetRealZoneText() return HOST.player.zone end
