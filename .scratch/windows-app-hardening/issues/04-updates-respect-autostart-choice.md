@@ -13,9 +13,9 @@ Source: Spec axis of the code review, finding (c)1; Standards smell 8.
 
 **Blocked by:** 03 (One place says what state Brag is in)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Manual check: install with autostart on, turn it off in the tray, install the same or a newer BragSetup.exe: autostart stays off (the tray menu shows it unticked, and Brag doesn't start at login)
-- [ ] Manual check: a first install on a clean machine offers autostart ticked and it works
-- [ ] Uninstall removes the startup entry whether it was set by the installer or the tray
-- [ ] The app side has a single definition of each shared name
+- [x] Manual check: install with autostart on, turn it off in the tray, install the same or a newer BragSetup.exe: autostart stays off (the tray menu shows it unticked, and Brag doesn't start at login)
+- [x] Manual check: a first install on a clean machine offers autostart ticked and it works
+- [x] Uninstall removes the startup entry whether it was set by the installer or the tray
+- [x] The app side has a single definition of each shared name

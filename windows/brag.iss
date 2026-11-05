@@ -19,7 +19,7 @@ OutputDir={#OutputDir}
 OutputBaseFilename=BragSetup
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\Brag.exe
-; desktop.py holds this mutex: Setup asks you to quit Brag before updating or uninstalling it
+; desktop.py's MUTEX: Setup asks you to quit Brag before updating or uninstalling it
 AppMutex=BragCompanion
 WizardStyle=modern
 Compression=lzma2
@@ -28,7 +28,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Tasks]
-Name: autostart; Description: "Start Brag when Windows starts (it waits in the tray)"
+; Only offered on a first install. On an update the player's current choice (the tray menu's "Start with
+; Windows") stands: see [Registry] below.
+Name: autostart; Description: "Start Brag when Windows starts (it waits in the tray)"; Check: not IsUpdate
 Name: desktopicon; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Files]
@@ -43,9 +45,25 @@ Name: "{autoprograms}\Brag"; Filename: "{app}\Brag.exe"
 Name: "{autodesktop}\Brag"; Filename: "{app}\Brag.exe"; Tasks: desktopicon
 
 [Registry]
-; the same value the tray menu's "Start with Windows" sets; removed on uninstall either way
+; The startup entry is desktop.py's RUN_KEY + RUN_VALUE, the one the tray menu's "Start with Windows" sets.
+; First install: written if the player ticks the task. Update: rewritten (new path) only if it's already on.
+; Uninstall: removed either way.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Brag"; ValueData: """{app}\Brag.exe"" --tray"; Tasks: autostart
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Brag"; ValueData: """{app}\Brag.exe"" --tray"; Check: IsUpdate and AutostartIsOn
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Brag"; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\Brag.exe"; Description: "Open Brag"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// Brag is already installed for this user: an update, not a first install.
+function IsUpdate: Boolean;
+begin
+  Result := RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{6B0F8E2A-5C1D-4E7B-9A43-B7A2D51C9E10}_is1', 'UninstallString');
+end;
+
+// "Start with Windows" is on right now (set by an earlier install or the tray menu).
+function AutostartIsOn: Boolean;
+begin
+  Result := RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Brag');
+end;

@@ -14,8 +14,10 @@ import watch
 APPDATA = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "Brag")
 APP_CONFIG = os.path.join(APPDATA, "brag-app.json")
 URL = f"http://127.0.0.1:{watch.PORT}"
-RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-MUTEX = "BragCompanion"  # windows\brag.iss uses it too, to ask you to quit Brag before updating
+# Shared with windows\brag.iss, which can't import them: keep both in step.
+RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"  # "Start with Windows" (brag.iss [Registry], [Code])
+RUN_VALUE = "Brag"
+MUTEX = "BragCompanion"  # brag.iss AppMutex: asks you to quit Brag before updating
 COLORS = {"ok": (232, 185, 84), "idle": (128, 120, 108), "failed": (239, 107, 91)}  # gold, grey, red
 
 window = icon = None
@@ -90,7 +92,7 @@ def launch_command():
 def autostart():
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
-            winreg.QueryValueEx(key, "Brag")
+            winreg.QueryValueEx(key, RUN_VALUE)
         return True
     except OSError:
         return False
@@ -99,10 +101,10 @@ def autostart():
 def set_autostart(on):
     with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
         if on:
-            winreg.SetValueEx(key, "Brag", 0, winreg.REG_SZ, launch_command())
+            winreg.SetValueEx(key, RUN_VALUE, 0, winreg.REG_SZ, launch_command())
         else:
             try:
-                winreg.DeleteValue(key, "Brag")
+                winreg.DeleteValue(key, RUN_VALUE)
             except FileNotFoundError:
                 pass
 
