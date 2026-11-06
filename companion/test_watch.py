@@ -502,4 +502,39 @@ with tempfile.TemporaryDirectory() as game:
     assert watch.status()[0] == "ok"
     watch.GAME_DIR = None
 
+
+# the companion tells the addon it runs (BragDB.companion), so the addon stops asking to install the app
+with tempfile.TemporaryDirectory() as game:
+    acc = lambda name: os.path.join(game, "WTF", "Account", name, "SavedVariables")
+    os.makedirs(acc("NEW"))  # an account that never logged in with Brag
+    os.makedirs(acc("OLD"))
+    old = os.path.join(acc("OLD"), "Brag.lua")
+    with open(old, "w") as f:
+        f.write('BragDB = {\n["enabled"] = false,\n}\nBragHistory = {\n{\n["time"] = 5,\n["text"] = "Level 2!",\n},\n}\n')
+    os.utime(old, (1_700_000_000, 1_700_000_000))
+    checked = {}
+    watch.mark_companion(game, checked)
+    new = os.path.join(acc("NEW"), "Brag.lua")
+    assert watch.load_saved(game)[0] == {"enabled": False, "companion": True}
+    assert watch.load_saved(game)[1] == [{"time": 5, "text": "Level 2!"}]  # the history is kept
+    assert os.path.getmtime(old) == 1_700_000_000  # still the account WoW saved last
+    with open(new) as f:
+        assert watch.parse_saved(f.read())[0] == {"companion": True}
+    assert watch.settings_file(game) == old  # a file only the companion wrote isn't WoW's
+    with open(old, "w") as f:
+        f.write('BragDB = {\n["enabled"] = true,\n}\n')  # WoW, running since before, logs out and drops it
+    watch.mark_companion(game, checked)
+    assert watch.load_saved(game)[0] == {"enabled": True, "companion": True}
+    real_save, watch.save_settings = watch.save_settings, lambda *a: (_ for _ in ()).throw(AssertionError("rewrote"))
+    try:
+        watch.mark_companion(game, checked)  # nothing changed: nothing rewritten
+        watch.mark_companion(game, {})  # already marked: nothing rewritten either
+    finally:
+        watch.save_settings = real_save
+
+with tempfile.TemporaryDirectory() as game:  # a new player: the marker alone doesn't tick "played"
+    os.makedirs(os.path.join(game, "WTF", "Account", "ME", "SavedVariables"))
+    watch.mark_companion(game, {})
+    assert watch.settings_file(game) is None and not watch.state(game)["setup"]["played"] and not watch.state(game)["found"]
+
 print("ok")

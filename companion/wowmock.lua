@@ -94,6 +94,8 @@ function Region:GetChecked() return self.checked end
 function Region:SetAutoFocus() end
 function Region:SetCursorPosition() end
 function Region:ClearFocus() end
+function Region:SetFocus() end
+function Region:HighlightText() self.highlighted = true end
 function Region:Click() if self.scripts.OnClick then self.scripts.OnClick(self, "LeftButton") end end
 
 function CreateFrame(kind, name, parent)
@@ -125,6 +127,8 @@ function MOCK_combatLog(...)
 end
 function GetTitleText() return MOCK_questTitle end
 function ReloadUI() MOCK_reloaded = true end
+MOCK_chat = {}
+function print(...) MOCK_chat[#MOCK_chat + 1] = table.concat({ ... }, " ") end -- the chat frame
 function Screenshot()
   HOST.screenshot()
   C_Timer.After(0.05, function() MOCK_fire("SCREENSHOT_SUCCEEDED") end) -- the game confirms a frame later

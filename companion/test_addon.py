@@ -124,4 +124,50 @@ with tempfile.TemporaryDirectory() as d:
     assert FakeWoW(d).db == {"enabled": True, "level": True, "quest": True, "loot": True, "boss": True, "death": True,
                              "minQuality": 4, "webhook": ""}
 
+
+# without the Brag app, the addon says posting needs it: in chat and in a window with the download link
+with tempfile.TemporaryDirectory() as d:
+    wow = FakeWoW(d)
+    g = wow.lua.globals()
+    assert "needs the free Brag app" in g.MOCK_chat[1] and not g.BragAppReminder
+    wow.advance(5)
+    link = g.BragAppReminder.link
+    assert g.BragAppReminder.IsShown(g.BragAppReminder) and link.text.endswith("/BragSetup.exe") and link.highlighted
+    link.scripts.OnTextChanged(link, True)  # typing in the box doesn't change the link
+    assert link.text.endswith("/BragSetup.exe")
+    wow.click("OK")
+    wow.slash()
+    wow.click("Get the app")  # /brag opens it again
+    assert g.BragAppReminder.IsShown(g.BragAppReminder) and not g.BragPanel.IsShown(g.BragPanel)
+    wow.click("Don't remind me")
+    wow.logout()
+    wow.login()
+    wow.advance(5)
+    g = wow.lua.globals()
+    assert len(g.MOCK_chat) == 0 and not g.BragAppReminder  # it remembers
+
+# once the app has run, no reminder and no Get the app button
+with tempfile.TemporaryDirectory() as d:
+    wow = FakeWoW(d)
+    wow.logout()
+    watch.mark_companion(d, {})
+    wow.login()
+    wow.advance(5)
+    g = wow.lua.globals()
+    assert wow.db["companion"] is True and len(g.MOCK_chat) == 0 and not g.BragAppReminder
+    wow.slash()
+    assert not g.MOCK_find("Button", "Get the app")
+    wow.click("Test post")
+    assert len(g.MOCK_chat) == 0
+    wow.logout()
+    assert load_saved(d)[0]["companion"] is True  # WoW keeps it at logout
+
+# a new player: the app writes the marker before WoW ever saved Brag's settings
+with tempfile.TemporaryDirectory() as d:
+    os.makedirs(os.path.join(d, "WTF", "Account", "FAKEWOW", "SavedVariables"))
+    watch.mark_companion(d, {})
+    wow = FakeWoW(d)
+    wow.advance(5)
+    assert wow.db["companion"] is True and wow.db["enabled"] is True and not wow.lua.globals().BragAppReminder
+
 print("ok")

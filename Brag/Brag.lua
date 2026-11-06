@@ -1,6 +1,8 @@
 -- WoW addons can't touch the network, so we only show a banner and take a screenshot.
--- The companion script posts the screenshot, using the webhook saved here in BragDB.
+-- The companion app posts the screenshot, using the webhook saved here in BragDB.
+-- The app sets BragDB.companion in this addon's saved settings; without it, Brag reminds you to install the app.
 local ADDON = ...
+local APP_URL = "https://github.com/laurensvc/brag/releases/latest/download/BragSetup.exe"
 local DEFAULTS = {
   enabled = true, level = true, quest = true, loot = true, boss = true, death = true, minQuality = 4, webhook = "",
 }
@@ -133,9 +135,72 @@ local function noteHit()
   if killer then lastHit = { killer = killer, at = GetTime() } end
 end
 
+-- "Install the Brag app" window: the download link in a box to copy from (WoW can't open links).
+local reminder
+local function showReminder()
+  if not reminder then
+    local r = CreateFrame("Frame", "BragAppReminder", UIParent, "BasicFrameTemplateWithInset")
+    r:SetSize(420, 196)
+    r:SetPoint("CENTER", 0, 120)
+    r:SetFrameStrata("DIALOG")
+    r:SetMovable(true)
+    r:EnableMouse(true)
+    r:RegisterForDrag("LeftButton")
+    r:SetScript("OnDragStart", r.StartMoving)
+    r:SetScript("OnDragStop", r.StopMovingOrSizing)
+    tinsert(UISpecialFrames, "BragAppReminder") -- Escape closes it
+    if r.TitleText then r.TitleText:SetText("Brag needs its app to post to Discord") end
+    local function text(template, s, y)
+      local t = r:CreateFontString(nil, "OVERLAY", template)
+      t:SetText(s)
+      t:SetPoint("TOPLEFT", 18, y)
+      t:SetWidth(384)
+      t:SetJustifyH("LEFT")
+      return t
+    end
+    text("GameFontHighlight", "Brag takes the screenshots, but WoW addons can't go online. The free Brag app "
+      .. "on your PC posts them to Discord. Copy this link (Ctrl+C) into your browser to get it:", -32)
+    local e = CreateFrame("EditBox", nil, r, "InputBoxTemplate")
+    e:SetSize(376, 20)
+    e:SetPoint("TOPLEFT", 24, -84)
+    e:SetAutoFocus(false)
+    e:SetText(APP_URL)
+    e:SetScript("OnTextChanged", function(self, userInput) -- read-only: put the link back
+      if userInput then self:SetText(APP_URL) self:HighlightText() end
+    end)
+    e:SetScript("OnEditFocusGained", e.HighlightText)
+    e:SetScript("OnEscapePressed", function() r:Hide() end)
+    r.link = e
+    text("GameFontDisableSmall", "Mac or Linux: see github.com/laurensvc/brag. Already have the app? "
+      .. "Keep it running: Brag notices it the next time you log in.", -112)
+    local ok = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+    ok:SetSize(120, 22)
+    ok:SetPoint("BOTTOMRIGHT", -14, 12)
+    ok:SetText("OK")
+    ok:SetScript("OnClick", function() r:Hide() end)
+    local never = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
+    never:SetSize(150, 22)
+    never:SetPoint("BOTTOMLEFT", 14, 12)
+    never:SetText("Don't remind me")
+    never:SetScript("OnClick", function()
+      db.remindApp = false
+      r:Hide()
+    end)
+    reminder = r
+  end
+  reminder:Show()
+  reminder.link:SetFocus()
+  reminder.link:HighlightText()
+end
+
+local function needsApp()
+  return db and not db.companion
+end
+
 local questTitle
 local f = CreateFrame("Frame")
 f:RegisterEvent("ADDON_LOADED")
+f:RegisterEvent("PLAYER_ENTERING_WORLD")
 f:RegisterEvent("PLAYER_LEVEL_UP")
 f:RegisterEvent("QUEST_COMPLETE")
 f:RegisterEvent("QUEST_TURNED_IN")
@@ -153,6 +218,12 @@ f:SetScript("OnEvent", function(_, event, arg1, arg2, _, _, arg5)
       if BragDB[k] == nil then BragDB[k] = v end
     end
     db = BragDB
+  elseif event == "PLAYER_ENTERING_WORLD" then
+    if arg1 and needsApp() and db.remindApp ~= false then -- arg1: a login, not a /reload or a loading screen
+      print("|cffffd100Brag:|r screenshots are taken, but posting them to Discord needs the free Brag app. "
+        .. "Type /brag and click Get the app.")
+      C_Timer.After(4, showReminder) -- after the loading screen and the login spam
+    end
   elseif event == "SCREENSHOT_SUCCEEDED" or event == "SCREENSHOT_FAILED" then
     if current and current.taken then nextShot() end -- ignores screenshots the player takes
   elseif not (db and db.enabled) then
@@ -272,7 +343,22 @@ local function buildPanel()
   test:SetScript("OnClick", function()
     p:Hide()
     brag("test", "Brag test: if this shows up in Discord, you're all set!")
+    if needsApp() then
+      print("|cffffd100Brag:|r the screenshot only reaches Discord if the Brag app runs on your PC. "
+        .. "Type /brag and click Get the app.")
+    end
   end)
+
+  if needsApp() then
+    local get = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
+    get:SetSize(100, 22)
+    get:SetPoint("BOTTOM", 0, 12)
+    get:SetText("Get the app")
+    get:SetScript("OnClick", function()
+      p:Hide()
+      showReminder()
+    end)
+  end
   p:Hide() -- new frames start shown; /brag toggles it right after building
   return p
 end

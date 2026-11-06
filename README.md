@@ -49,7 +49,8 @@ Brag to get the window back. `Brag.exe --browser` always uses the browser.
 2. Paste your Discord link under **Connect Discord** and click **Send test message**.
 
 Installing the addon yourself (CurseForge, or `Brag-<version>.zip` from the
-[latest release](https://github.com/laurensvc/brag/releases/latest)) works too: unzip it into
+[latest release](https://github.com/laurensvc/brag/releases/latest)) works too, but posting still needs the app or
+the script: until the addon sees it has run, it reminds you at login with the download link. Unzip it into
 `<WoW install>/_forever_/Interface/AddOns/`, so you get `AddOns/Brag/Brag.toc`. Using GitHub's "Download ZIP"?
 Copy only the `Brag` folder inside `brag-main`: WoW ignores an addon whose folder name doesn't match its `.toc`
 file. If WoW calls the addon out of date, tick "Load out of date AddOns" on the character screen.

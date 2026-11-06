@@ -75,7 +75,7 @@ class FakeWoW:
             chunk = self.lua.eval("function(src) return assert(loadstring(src, '@Brag.lua')) end")(f.read())
         chunk("Brag")  # an addon file gets the addon name as its first vararg
         self.fire("ADDON_LOADED", "Brag")
-        self.fire("PLAYER_ENTERING_WORLD")
+        self.fire("PLAYER_ENTERING_WORLD", True)  # isInitialLogin
 
     def time(self):
         return self.started + self.lua.globals().MOCK_now()

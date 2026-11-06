@@ -37,6 +37,7 @@ TOGGLES = [k for k, v in DEFAULTS.items() if isinstance(v, bool)]
 COMPANION_DEFAULTS = {"caption": True, "funny": True, "retries": 3, "maxHeight": 1080, "jpegQuality": 85, "keepDays": 7,
                       "deleteShots": False, "webhook": ""}
 HEIGHTS = (0, 720, 1080, 1440, 2160)  # 0 = keep the original size
+MARKER_MTIME = 86400  # the time of a Brag.lua only the companion has written (WoW never saved it)
 MAX_BYTES = 8 * 1024 * 1024  # smallest Discord webhook upload limit (servers without boosts)
 QUALITY = {0: "Poor", 1: "Common", 2: "Uncommon", 3: "Rare", 4: "Epic", 5: "Legendary", 6: "Artifact"}
 # Strict on purpose: the URL is handed to curl and written back into a Lua file.
@@ -158,10 +159,40 @@ def lua_db(db):
     return "BragDB = {\n" + "".join(f'["{k}"] = {val(v)},\n' for k, v in db.items()) + "}"
 
 
+def saved_files(game_dir):
+    return glob.glob(os.path.join(game_dir, "WTF", "Account", "*", "SavedVariables", "Brag.lua"))
+
+
 def settings_file(game_dir):
+    """The Brag.lua WoW saved last, or None. Files only the companion has written (see mark_companion) don't count."""
     # shortcut: with several WoW accounts we use the most recently saved one; add an account picker if that bites
-    files = glob.glob(os.path.join(game_dir, "WTF", "Account", "*", "SavedVariables", "Brag.lua"))
+    files = [f for f in saved_files(game_dir) if os.path.getmtime(f) > MARKER_MTIME]
     return max(files, key=os.path.getmtime) if files else None
+
+
+def mark_companion(game_dir, checked):
+    """Set BragDB.companion in every WoW account's Brag.lua, so the addon knows posting works and doesn't remind
+    the player to install Brag. WoW drops it if the file is written while WoW runs (its logout overwrites the file),
+    so `checked` ({path: mtime}, updated in place) lets each pass recheck only files that changed.
+    Keeps each file's time, so settings_file still picks the account WoW saved last; a file created here for an
+    account that never logged in with Brag gets an old time, so it doesn't count as saved by WoW. Raises OSError."""
+    files = set(saved_files(game_dir))
+    for account in glob.glob(os.path.join(game_dir, "WTF", "Account", "*", "SavedVariables")):
+        path = os.path.join(account, "Brag.lua")
+        if path not in files:
+            write_atomic(path, lua_db({"companion": True}) + "\n")
+            os.utime(path, (MARKER_MTIME, MARKER_MTIME))
+            checked[path] = MARKER_MTIME
+    for path in files:
+        mtime = os.path.getmtime(path)
+        if checked.get(path) == mtime:
+            continue
+        with open(path, encoding="utf-8", errors="replace") as f:
+            db, _ = parse_saved(f.read())
+        if db.get("companion") is not True:
+            save_settings(path, {"companion": True})
+            os.utime(path, (mtime, mtime))
+        checked[path] = mtime
 
 
 def load_saved(game_dir):
@@ -558,6 +589,8 @@ class Watching:
     folder: str = None  # the Screenshots folder being watched; None until a WoW folder is chosen
     seen: set = dataclasses.field(default_factory=set)  # file names already there or already handled
     cleaned: float = 0  # when old history (and maybe old screenshots) was last cleaned up
+    marked: dict = dataclasses.field(default_factory=dict)  # Brag.lua files marked for the addon: {path: mtime}
+    mark_failed: bool = False  # marking them failed, and that was reported
 
 
 def watch_once(watching):
@@ -572,6 +605,12 @@ def watch_once(watching):
         watching.seen = set(os.listdir(watching.folder))
         say(f"Watching {watching.folder}")
         ensure_addon(game_dir)
+    try:
+        mark_companion(game_dir, watching.marked)
+    except OSError as e:  # posting doesn't depend on it: the addon just keeps reminding the player to install Brag
+        if not watching.mark_failed:
+            watching.mark_failed = True
+            report_error("Couldn't tell the Brag addon that the app is running", e)
     if time.time() - watching.cleaned > 3600:
         watching.cleaned = time.time()  # first, so a cleanup that keeps failing can't block posting
         try:
