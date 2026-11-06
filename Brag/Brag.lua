@@ -89,7 +89,7 @@ local function playerName()
   return first
 end
 
--- kind: level | quest | loot | boss | death | test. detail: quest title, item name or boss name.
+-- kind: level | quest | loot | boss | death | test. detail: quest title, item name, boss name or killer.
 local function brag(kind, text, detail, quality, level)
   tinsert(BragHistory, { time = time(), text = text }) -- the companion app shows this history
   if #BragHistory > 500 then tremove(BragHistory, 1) end -- keep the saved file small
@@ -112,6 +112,27 @@ local function linkQuality(link)
   return select(3, GetItemInfo(link))
 end
 
+-- PLAYER_DEAD doesn't say what killed you, so remember the last thing that hurt you, from the combat log.
+-- Fields: timestamp, subevent, hideCaster, source GUID/name/flags/raidFlags, dest GUID/name/flags/raidFlags,
+-- then the subevent's own: environmental type for ENVIRONMENTAL_, spell ID and name for SPELL_ and RANGE_.
+local ENVIRONMENT = {
+  FALLING = "Falling", DROWNING = "Drowning", FATIGUE = "Fatigue", FIRE = "Fire", LAVA = "Lava", SLIME = "Slime",
+}
+local lastHit
+local function noteHit()
+  local _, sub, _, _, source, _, _, dest, _, _, _, a12, a13 = CombatLogGetCurrentEventInfo()
+  if dest ~= UnitGUID("player") or not sub then return end
+  local killer
+  if sub == "ENVIRONMENTAL_DAMAGE" then
+    killer = ENVIRONMENT[tostring(a12):upper()] or a12
+  elseif sub == "SWING_DAMAGE" then
+    killer = source
+  elseif sub:find("_DAMAGE$") or sub:find("^DAMAGE_") or sub == "SPELL_INSTAKILL" then
+    killer = (source and a13 and source .. "'s " .. a13) or source or a13
+  end
+  if killer then lastHit = { killer = killer, at = GetTime() } end
+end
+
 local questTitle
 local f = CreateFrame("Frame")
 f:RegisterEvent("ADDON_LOADED")
@@ -121,6 +142,7 @@ f:RegisterEvent("QUEST_TURNED_IN")
 f:RegisterEvent("CHAT_MSG_LOOT")
 f:RegisterEvent("ENCOUNTER_END")
 f:RegisterEvent("PLAYER_DEAD")
+if CombatLogGetCurrentEventInfo then f:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED") end
 f:RegisterEvent("SCREENSHOT_SUCCEEDED")
 f:RegisterEvent("SCREENSHOT_FAILED")
 f:SetScript("OnEvent", function(_, event, arg1, arg2, _, _, arg5)
@@ -135,6 +157,8 @@ f:SetScript("OnEvent", function(_, event, arg1, arg2, _, _, arg5)
     if current and current.taken then nextShot() end -- ignores screenshots the player takes
   elseif not (db and db.enabled) then
     return
+  elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
+    if db.death then noteHit() end
   elseif event == "PLAYER_LEVEL_UP" and db.level then
     brag("level", "Level " .. arg1 .. "!", nil, nil, arg1) -- UnitLevel still says the old level here
   elseif event == "QUEST_COMPLETE" then
@@ -156,7 +180,11 @@ f:SetScript("OnEvent", function(_, event, arg1, arg2, _, _, arg5)
   elseif event == "ENCOUNTER_END" and db.boss and arg5 == 1 then -- encounterID, name, difficulty, size, success
     brag("boss", "Boss defeated: " .. (arg2 or "?"), arg2 or "?")
   elseif event == "PLAYER_DEAD" and db.death then
-    brag("death", "Died in " .. GetRealZoneText(), nil)
+    C_Timer.After(0.2, function() -- the killing blow can reach the combat log just after this event
+      local killer = lastHit and GetTime() - lastHit.at < 10 and lastHit.killer -- nothing recent: unknown
+      lastHit = nil
+      brag("death", (killer and "Died to " .. killer .. " in " or "Died in ") .. GetRealZoneText(), killer)
+    end)
   end
 end)
 

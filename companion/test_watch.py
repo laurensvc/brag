@@ -107,18 +107,21 @@ assert caption("1\tlevel\tThrall\t\t42\t\t\t") == "🎉 **Thrall** reached **lev
 assert caption("1\tboss\tThrall\tShaman\t60\tMolten Core\tMajordomo *Executus*\t") == (
     "⚔️ **Thrall** defeated **Majordomo \\*Executus\\***!\n-# Level 60 Shaman · Molten Core")
 assert caption("1\tdeath\tThrall\tShaman\t60\tMolten Core\t\t", md=False) == "💀 Thrall died · Level 60 Shaman · Molten Core"
+assert caption("1\tdeath\tThrall\tShaman\t60\tMolten Core\tRagnaros's Lava_Burst\t") == (
+    "💀 **Thrall** died to **Ragnaros's Lava\\_Burst**\n-# Level 60 Shaman · Molten Core")
 assert validate({**DEFAULTS, "death": "no"}) and validate({k: v for k, v in DEFAULTS.items() if k != "boss"})
 assert caption("2\tfuture\tformat") == caption(None) == caption("1\tdance\ta\tb\tc\td\te\tf") == ""
 
 # funny captions: every line fills in for its event, with names escaped; the post and the page get the same line
 import flavor
 events = {"level": "1\tlevel\tPi*erre\tMage\t10\t\t\t", "quest": QUEST, "loot": LOOT,
-          "boss": "1\tboss\tThrall\tShaman\t60\tMolten Core\tRagnaros\t", "death": "1\tdeath\tThrall\tShaman\t60\t\t\t"}
+          "boss": "1\tboss\tThrall\tShaman\t60\tMolten Core\tRagnaros\t", "death": "1\tdeath\tThrall\tShaman\t60\t\t\t",
+          "death_by": "1\tdeath\tThrall\tShaman\t60\t\tHogger\t"}
 assert set(flavor.FLAVOR) == set(events) and all(len(lines) >= 10 for lines in flavor.FLAVOR.values())
 for kind, lines in flavor.FLAVOR.items():
     for line in lines:
         assert not watch.MARKDOWN.search(line.replace("{", "").replace("}", "")), line  # plain text, see flavor.py
-        line.format(who="", level="", quest="", item="", boss="", zone="")  # no unknown placeholders
+        line.format(who="", level="", quest="", item="", boss="", killer="", zone="")  # no unknown placeholders
     assert len(set(lines)) == len(lines), kind  # no line twice
     seen = {caption(events[kind], md=False, funny=True, seed=str(i)) for i in range(2000)}
     assert len(seen) == len(lines), (kind, len(seen))  # every line comes up

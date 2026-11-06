@@ -115,6 +115,14 @@ function UnitName() return HOST.player.name, HOST.player.surname end  -- Forever
 function UnitClass() return HOST.player.class, HOST.player.class:upper(), 7 end
 function UnitLevel() return HOST.player.level end
 function GetRealZoneText() return HOST.player.zone end
+function UnitGUID(unit) if unit == "player" then return "Player-1-00000001" end end
+function GetTime() return now end
+MOCK_combat = { n = 0 } -- the combat log event being fired, set by MOCK_combatLog
+function CombatLogGetCurrentEventInfo() return unpack(MOCK_combat, 1, MOCK_combat.n) end
+function MOCK_combatLog(...)
+  MOCK_combat = { n = select("#", ...), ... }
+  MOCK_fire("COMBAT_LOG_EVENT_UNFILTERED")
+end
 function GetTitleText() return MOCK_questTitle end
 function ReloadUI() MOCK_reloaded = true end
 function Screenshot()

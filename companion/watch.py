@@ -358,18 +358,18 @@ def caption(payload, md=True, funny=False, seed=""):
     who = bold(name or "Someone")
     q = QUALITY.get(int(quality)) if quality.isdigit() else None
     item = bold("[" + detail + "]") + (f" ({q})" if q else "")  # "[name] (Epic)": the page colors it by quality
-    lines = FLAVOR.get(kind) if funny else None
+    lines = FLAVOR.get("death_by" if kind == "death" and detail else kind) if funny else None
     if lines:
         line = lines[zlib.crc32(f"{payload}\t{seed}".encode()) % len(lines)]
         head = line.format(who=who, level=bold(level), quest=bold(detail), item=item, boss=bold(detail),
-                           zone=esc(zone or "Azeroth"))
+                           killer=bold(detail), zone=esc(zone or "Azeroth"))
     else:
         head = {
             "level": f"🎉 {who} reached {bold('level ' + level)}!",
             "quest": f"📜 {who} completed {bold(detail)}",
             "loot": f"💎 {who} looted {item}",
             "boss": f"⚔️ {who} defeated {bold(detail)}!",
-            "death": f"💀 {who} died",
+            "death": f"💀 {who} died to {bold(detail)}" if detail else f"💀 {who} died",
             "test": f"✅ Brag test from {who}: if you can read this, you're all set!",
         }.get(kind)
     if not head:

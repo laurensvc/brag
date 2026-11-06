@@ -8,7 +8,8 @@ Needs: python3 -m pip install lupa pillow
   python3 companion/watch.py DIR                    # in another terminal: the real companion
   python3 companion/fakewow.py DIR demo             # play: quest + level up, a legendary, a test post
 
-Events (any number, in order): level, quest=TITLE, loot=ITEM[:QUALITY], boss=NAME (a kill), wipe=NAME, death,
+Events (any number, in order): level, quest=TITLE, loot=ITEM[:QUALITY], boss=NAME (a kill), wipe=NAME,
+death[=MOB[:SPELL]] (MOB can also be falling, drowning, lava, fire, slime or fatigue),
 print (Print Screen), test (Test post button), demo. QUALITY is a number 0-6 or a name (default epic); add "uncached" to the loot name's quality, e.g.
 loot=Shiny:epic-uncached, to skip the item cache. Each run is one login session: it logs out at the end.
 """
@@ -121,7 +122,24 @@ class FakeWoW:
         self.fire("ENCOUNTER_END", 663, boss, 9, 40, 1 if killed else 0)  # a wipe ends it with success 0
         self.advance(5)
 
-    def die(self):
+    def hit(self, source=None, spell=None, environment=None, target="Player-1-00000001"):
+        """A combat log damage event on target (you, by default): an environmental type, a spell, or a melee swing."""
+        def log(sub, source_guid, *rest):
+            self.lua.globals().MOCK_combatLog(self.time(), sub, False, source_guid, source, 0, 0,
+                                              target, self.player["name"], 0, 0, *rest)
+        if environment:
+            log("ENVIRONMENTAL_DAMAGE", None, environment.upper(), 500)
+        elif spell:
+            log("SPELL_DAMAGE", "Creature-0-1-2-3-4-5", 133, spell, 4, 500)
+        else:
+            log("SWING_DAMAGE", "Creature-0-1-2-3-4-5", 500)
+
+    def die(self, killer=None, spell=None):
+        """Die, after a last hit from killer (a mob, or an environmental type like falling), or of nothing logged."""
+        if killer in ("falling", "drowning", "lava", "fire", "slime", "fatigue"):
+            self.hit(environment=killer)
+        elif killer:
+            self.hit(killer, spell)
         self.fire("PLAYER_DEAD")
         self.advance(5)
 
@@ -196,7 +214,8 @@ def run(wow, event):
     elif kind in ("boss", "wipe"):
         wow.end_encounter(arg or "Ragnaros", killed=kind == "boss")
     elif kind == "death":
-        wow.die()
+        killer, _, spell = arg.partition(":")
+        wow.die(killer or None, spell or None)
     elif kind == "print":
         wow.print_screen()
     elif kind == "test":

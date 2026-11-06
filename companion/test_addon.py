@@ -28,6 +28,14 @@ for size, scale, quality in [((1920, 1080), 1.0, 30), ((2560, 1440), 0.71, 30), 
         wow.end_encounter("Ragnaros", killed=False)  # a wipe: nothing
         wow.end_encounter("Ragnaros")
         wow.die()
+        wow.die("Hogger", "Fireball")
+        wow.hit("Ragnaros", target="Party-1")  # someone else's hit doesn't count: nothing logged on you
+        wow.die()
+        wow.die("Defias Thug")
+        wow.die("falling")
+        wow.hit("Hogger")
+        wow.advance(20)  # a hit long before dying isn't the killer
+        wow.die()
         wow.print_screen()  # the player's own screenshot: no strip
         assert captions(wow) == [
             "📜 Jaïna Proudmoore completed The \"Missing\" Diplomat part 1 · Level 41 Shaman · Theramore Isle",
@@ -36,6 +44,11 @@ for size, scale, quality in [((1920, 1080), 1.0, 30), ((2560, 1440), 0.71, 30), 
             "💎 Jaïna Proudmoore looted [Krol Blade] (Epic) · Level 42 Shaman · Theramore Isle",
             "💎 Jaïna Proudmoore looted [Lucky Charm] (Epic) · Level 42 Shaman · Theramore Isle",
             "⚔️ Jaïna Proudmoore defeated Ragnaros! · Level 42 Shaman · Theramore Isle",
+            "💀 Jaïna Proudmoore died · Level 42 Shaman · Theramore Isle",
+            "💀 Jaïna Proudmoore died to Hogger's Fireball · Level 42 Shaman · Theramore Isle",
+            "💀 Jaïna Proudmoore died · Level 42 Shaman · Theramore Isle",
+            "💀 Jaïna Proudmoore died to Defias Thug · Level 42 Shaman · Theramore Isle",
+            "💀 Jaïna Proudmoore died to Falling · Level 42 Shaman · Theramore Isle",
             "💀 Jaïna Proudmoore died · Level 42 Shaman · Theramore Isle",
             "",
         ], (size, scale, captions(wow))
@@ -92,6 +105,8 @@ with tempfile.TemporaryDirectory() as d:
     wow.lua.globals().BragDB.death = True
     wow.die()
     assert len(wow.taken) == before + 1 and wow.lua.globals().BragHistory[3].text == "Died in Orgrimmar"
+    wow.die("Hogger")
+    assert wow.lua.globals().BragHistory[4].text == "Died to Hogger in Orgrimmar"
 
 with tempfile.TemporaryDirectory() as d:
     # an addon from before deaths and boss kills: its saved settings get them, switched on

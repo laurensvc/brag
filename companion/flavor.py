@@ -1,8 +1,9 @@
 """Funny caption lines for Brag's posts, one list per event. Add as many as you like.
 
 Placeholders: {who} the character, {level} the new level, {quest} the quest, {item} the item (with its quality),
-{boss} the boss, {zone} where it happened. Each line uses only the placeholders its event has. Write plain text:
-Brag adds the bold and escapes names itself, so don't use * _ ~ ` | < > [ ] ( ) here.
+{boss} the boss, {killer} what killed them, {zone} where it happened. Each line uses only the placeholders its
+event has; "death_by" is for deaths with a known killer (a mob, a mob's spell, or Falling, Lava and so on).
+Write plain text: Brag adds the bold and escapes names itself, so don't use * _ ~ ` | < > [ ] ( ) here.
 """
 
 FLAVOR = {
@@ -171,5 +172,22 @@ FLAVOR = {
         "💀 {who} died. Fall damage remains undefeated",
         "💀 {who} died. It's fine, they meant to do that",
         "💀 {who} was killed. Avenge them! Or just laugh, that works too",
+    ],
+    "death_by": [
+        "💀 {who} died to {killer}. Revenge is scheduled",
+        "💀 {killer} sent {who} to the spirit healer",
+        "💀 {who} vs {killer}: {killer} wins",
+        "💀 {killer} 1, {who} 0",
+        "💀 {who} was deleted by {killer}",
+        "💀 {killer} would like everyone to know they killed {who}",
+        "💀 {who} lost an argument with {killer} in {zone}",
+        "💀 {who} died to {killer}. Who pulled that?",
+        "💀 {who} died to {killer}. The healer saw nothing",
+        "💀 RIP {who}. Cause of death: {killer}",
+        "💀 {who} has been defeated by {killer}. Grats, {killer}",
+        "💀 {killer} added {who} to their collection",
+        "💀 {who} died to {killer}. In their defense, it had more health",
+        "💀 {who} met {killer} in {zone}. It did not go well",
+        "💀 {who} died to {killer}. Lag. Definitely lag",
     ],
 }

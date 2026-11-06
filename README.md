@@ -83,7 +83,7 @@ python3 -m pip install lupa pillow
 python3 companion/fakewow.py fake-wow --webhook "https://discord.com/api/webhooks/..."   # /brag: paste, Save & reload
 python3 companion/watch.py fake-wow                                                     # in a second terminal
 python3 companion/fakewow.py fake-wow demo        # quest turn-in that levels up, a legendary, a Test post
-python3 companion/fakewow.py fake-wow level "quest=Bounty on Murlocs" "loot=Krol Blade:epic" boss=Onyxia death print
+python3 companion/fakewow.py fake-wow level "quest=Bounty on Murlocs" "loot=Krol Blade:epic" boss=Onyxia death=Hogger:Fireball print
 ```
 Options: `--size 2560x1440`, `--ui-scale 0.71`, `--name`, `--zone`; `python3 companion/fakewow.py --help` lists the events.
 The mock only knows the API calls Brag makes and draws an idealized frame, so check real rendering in game.
