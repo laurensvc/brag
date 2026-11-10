@@ -231,7 +231,7 @@
         <label class="row"><input type="checkbox" id="level"> Level ups</label>
         <label class="row"><input type="checkbox" id="quest"> Quests you finish</label>
         <label class="row"><input type="checkbox" id="loot"> Good loot</label>
-        <label class="row"><input type="checkbox" id="boss"> Boss kills</label>
+        <label class="row"><input type="checkbox" id="boss"> Dungeon and raid runs</label>
         <label class="row"><input type="checkbox" id="death"> Deaths</label>
         <label class="field"><span>Only loot this good or better</span>
           <select id="minQuality">
@@ -357,7 +357,7 @@
     $("#webhookText").textContent = done.webhook ? "Connected: Brag posts to your Discord channel." : "";
     $("#playText").textContent = done.play
       ? "Brag has seen you in WoW. You're all set: keep this app running while you play (it waits next to the clock)."
-      : "Log in to WoW. Brag takes a screenshot when you level up, finish a quest, loot something good, kill a boss " +
+      : "Log in to WoW. Brag takes a screenshot when you level up, finish a quest, loot something good, finish a dungeon " +
         "or die, and posts it to Discord within seconds. To try it now, type /brag in the WoW chat and click Test post.";
   }
   for (const b of document.querySelectorAll(".edit")) {

@@ -9,7 +9,8 @@ Needs: python3 -m pip install lupa pillow
   python3 companion/fakewow.py DIR demo             # play: quest + level up, a legendary, a test post
 
 Events (any number, in order): level, quest=TITLE, loot=ITEM[:QUALITY], boss=NAME (a kill), wipe=NAME,
-death[=MOB[:SPELL]] (MOB can also be falling, drowning, lava, fire, slime or fatigue),
+death[=MOB[:SPELL]] (MOB can also be falling, drowning, lava, fire, slime or fatigue), release (go to the graveyard
+as a ghost), revive, enter=DUNGEON[:raid], leave (to --zone), run=DUNGEON (enter, three bosses, a death, leave),
 print (Print Screen), test (Test post button), demo. QUALITY is a number 0-6 or a name (default epic); add "uncached" to the loot name's quality, e.g.
 loot=Shiny:epic-uncached, to skip the item cache. Each run is one login session: it logs out at the end.
 """
@@ -49,10 +50,14 @@ class FakeWoW:
         self.dir, self.size, self.quality, self.clock = game_dir, size, jpeg_quality, clock
         self.shots = os.path.join(game_dir, "Screenshots")
         self.saved = os.path.join(game_dir, "WTF", "Account", "FAKEWOW", "SavedVariables", "Brag.lua")
-        os.makedirs(self.shots, exist_ok=True)
-        os.makedirs(os.path.dirname(self.saved), exist_ok=True)
         self.player = {"name": "Thrall", "class": "Shaman", "level": 41, "zone": "Orgrimmar", **(player or {})}
-        self.ui_scale, self.items, self.taken, self.lua = ui_scale, {}, [], None
+        self.outside = self.player["zone"]  # where "leave" takes you
+        # per character: WTF/Account/<account>/<realm>/<character>/SavedVariables
+        self.saved_char = os.path.join(game_dir, "WTF", "Account", "FAKEWOW", "Fakerealm", self.player["name"],
+                                       "SavedVariables", "Brag.lua")
+        for path in (self.shots, os.path.dirname(self.saved), os.path.dirname(self.saved_char)):
+            os.makedirs(path, exist_ok=True)
+        self.ui_scale, self.items, self.taken, self.tips, self.lua = ui_scale, {}, [], [], None
         self.login()
 
     def login(self):
@@ -68,9 +73,10 @@ class FakeWoW:
         })
         with open(os.path.join(HERE, "wowmock.lua"), encoding="utf-8") as f:
             self.lua.execute(f.read())
-        if os.path.exists(self.saved):  # WoW runs the SavedVariables file before the addon loads
-            with open(self.saved, encoding="utf-8") as f:
-                self.lua.execute(f.read())
+        for path in (self.saved, self.saved_char):  # WoW runs the SavedVariables files before the addon loads
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    self.lua.execute(f.read())
         with open(ADDON, encoding="utf-8") as f:
             chunk = self.lua.eval("function(src) return assert(loadstring(src, '@Brag.lua')) end")(f.read())
         chunk("Brag")  # an addon file gets the addon name as its first vararg
@@ -90,12 +96,26 @@ class FakeWoW:
     def db(self):
         return to_python(self.lua.globals().BragDB)
 
+    @property
+    def char(self):
+        return to_python(self.lua.globals().BragChar)
+
+    def _set(self, **player):
+        """Change the player (zone, instance, dead, ...) in both the Python and the Lua copy."""
+        self.player.update(player)
+        for k, v in player.items():
+            self.lua.globals().HOST.player[k] = v
+
     # --- what a player does ---
 
+    def _ding(self):
+        g = self.lua.globals()
+        self.fire("PLAYER_LEVEL_UP", self.player["level"] + 1)
+        self._set(level=self.player["level"] + 1)
+        g.MOCK_played.levelStart = g.MOCK_played.total + g.MOCK_now()  # the server starts timing the new level
+
     def level_up(self):
-        self.player["level"] += 1
-        self.fire("PLAYER_LEVEL_UP", self.player["level"])
-        self.lua.globals().HOST.player.level = self.player["level"]
+        self._ding()
         self.advance(5)
 
     def turn_in(self, title, levels_up=False):
@@ -103,9 +123,33 @@ class FakeWoW:
         self.fire("QUEST_COMPLETE")
         self.fire("QUEST_TURNED_IN", 1234, 0, 0)
         if levels_up:  # same moment, like a real turn-in that dings
-            self.player["level"] += 1
-            self.fire("PLAYER_LEVEL_UP", self.player["level"])
-            self.lua.globals().HOST.player.level = self.player["level"]
+            self._ding()
+        self.advance(5)
+
+    def enter(self, instance, raid=False):
+        """Zone into a dungeon (or a raid): a loading screen."""
+        self._set(instance=instance, instanceType="raid" if raid else "party", zone=instance)
+        self.fire("PLAYER_ENTERING_WORLD", False, False)
+        self.advance(5)
+
+    def leave(self, zone=None):
+        self._set(instance=None, zone=zone or self.outside)
+        self.fire("PLAYER_ENTERING_WORLD", False, False)
+        self.advance(5)
+
+    def release(self, graveyard="The Barrens"):
+        """Release your spirit: a ghost at the graveyard, outside the instance if you died in one."""
+        self._set(dead=False, ghost=True)
+        self.fire("PLAYER_ALIVE")  # WoW says this on release too
+        if self.player.get("instance"):
+            self.leave(graveyard)
+
+    def revive(self, instance=None):
+        """Back alive: at your corpse (inside instance, if given: the corpse run went in) or at a spirit healer."""
+        if instance:
+            self.enter(instance)
+        self._set(dead=False, ghost=False)
+        self.fire("PLAYER_UNGHOST")
         self.advance(5)
 
     def loot(self, name, quality=4, cached=True, pushed=False):
@@ -140,6 +184,7 @@ class FakeWoW:
             self.hit(environment=killer)
         elif killer:
             self.hit(killer, spell)
+        self._set(dead=True)
         self.fire("PLAYER_DEAD")
         self.advance(5)
 
@@ -170,6 +215,8 @@ class FakeWoW:
         g = self.lua.globals()
         with open(self.saved, "w", encoding="utf-8") as f:
             f.write(f"\nBragDB = {lua_literal(to_python(g.BragDB))}\nBragHistory = {lua_literal(to_python(g.BragHistory) or [])}\n")
+        with open(self.saved_char, "w", encoding="utf-8") as f:
+            f.write(f"\nBragChar = {lua_literal(to_python(g.BragChar) or {})}\n")
 
     # --- the screenshot WoW would take ---
 
@@ -189,6 +236,12 @@ class FakeWoW:
             font = ImageFont.load_default()
         for i, text in enumerate(reversed(banners)):
             d.text((w / 2, h * 0.22 + i * h / 18), text, font=font, fill=(255, 72, 0), anchor="mm", stroke_width=2, stroke_fill=(0, 0, 0))
+        tip = g.BragTooltip
+        if tip and tip.IsVisible(tip) and tip.link:  # the item's tooltip: a plain box with its name
+            box = (w * 0.56, h * 0.4, w * 0.8, h * 0.62)
+            d.rectangle(box, fill=(10, 12, 30), outline=(200, 200, 200), width=2)
+            name = tip.link.split("|h[")[1].split("]|h")[0]
+            d.text((box[0] + 12, box[1] + 12), name, font=font, fill="#" + tip.link[4:10])
         rects = g.MOCK_render()
         for x, y, bw, bh, r, gr, b, _ in (tuple(rects[i][k] for k in range(1, 9)) for i in range(1, len(rects) + 1)):
             d.rectangle([round(x), round(y), round(x + bw) - 1, round(y + bh) - 1], fill=(round(r * 255), round(gr * 255), round(b * 255)))
@@ -199,6 +252,7 @@ class FakeWoW:
             path = os.path.join(self.shots, stamp.strftime("WoWScrnShot_%m%d%y_%H%M%S.jpg"))
         img.save(path, "JPEG", quality=self.quality)
         self.taken.append(path)
+        self.tips.append(tip.link if tip and tip.IsVisible(tip) else None)  # the item tooltip in it, if any
 
 
 def run(wow, event):
@@ -216,6 +270,23 @@ def run(wow, event):
     elif kind == "death":
         killer, _, spell = arg.partition(":")
         wow.die(killer or None, spell or None)
+    elif kind == "release":
+        wow.release()
+    elif kind == "revive":
+        wow.revive()
+    elif kind == "enter":
+        name, _, raid = arg.partition(":")
+        wow.enter(name or "Wailing Caverns", raid == "raid")
+    elif kind == "leave":
+        wow.leave()
+    elif kind == "run":
+        wow.enter(arg or "Wailing Caverns")
+        for boss in ("Lady Anacondra", "Lord Cobrahn", "Mutanus the Devourer"):
+            wow.advance(600)
+            wow.end_encounter(boss)
+        wow.die("Deviate Lasher")
+        wow.revive()  # a healer's resurrection, inside
+        wow.leave()
     elif kind == "print":
         wow.print_screen()
     elif kind == "test":

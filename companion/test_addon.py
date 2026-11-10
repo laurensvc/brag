@@ -16,6 +16,13 @@ def captions(wow):
     return out
 
 
+def die(wow, *killer):
+    """Die, get back up, and wait: deaths within 30 seconds of each other count as one."""
+    wow.die(*killer)
+    wow.revive()
+    wow.advance(30)
+
+
 # Every event, at several screen sizes and UI scales: the strip decodes to the right caption.
 for size, scale, quality in [((1920, 1080), 1.0, 30), ((2560, 1440), 0.71, 30), ((3840, 2160), 1.15, 20), ((1366, 768), 0.9, 15)]:
     with tempfile.TemporaryDirectory() as d:
@@ -26,20 +33,20 @@ for size, scale, quality in [((1920, 1080), 1.0, 30), ((2560, 1440), 0.71, 30), 
         wow.loot("Linen Cloth", 1)  # below the minimum quality: nothing
         wow.loot("Lucky Charm", 4, pushed=True)  # "You receive item:" (quest rewards, mail)
         wow.end_encounter("Ragnaros", killed=False)  # a wipe: nothing
-        wow.end_encounter("Ragnaros")
-        wow.die()
-        wow.die("Hogger", "Fireball")
+        wow.end_encounter("Ragnaros")  # outside a dungeon or raid: a world boss, posted right away
+        die(wow)
+        die(wow, "Hogger", "Fireball")
         wow.hit("Ragnaros", target="Party-1")  # someone else's hit doesn't count: nothing logged on you
-        wow.die()
-        wow.die("Defias Thug")
-        wow.die("falling")
+        die(wow)
+        die(wow, "Defias Thug")
+        die(wow, "falling")
         wow.hit("Hogger")
         wow.advance(20)  # a hit long before dying isn't the killer
-        wow.die()
+        die(wow)
         wow.print_screen()  # the player's own screenshot: no strip
         assert captions(wow) == [
             "📜 Jaïna Proudmoore completed The \"Missing\" Diplomat part 1 · Level 41 Shaman · Theramore Isle",
-            "🎉 Jaïna Proudmoore reached level 42! · Shaman · Theramore Isle",
+            "🎉 Jaïna Proudmoore reached level 42! · ⏱️ 1d 3h played · Shaman · Theramore Isle",
             "💎 Jaïna Proudmoore looted [Thunderfury, Blessed Blade of the Windseeker] (Legendary) · Level 42 Shaman · Theramore Isle",
             "💎 Jaïna Proudmoore looted [Krol Blade] (Epic) · Level 42 Shaman · Theramore Isle",
             "💎 Jaïna Proudmoore looted [Lucky Charm] (Epic) · Level 42 Shaman · Theramore Isle",
@@ -99,13 +106,13 @@ with tempfile.TemporaryDirectory() as d:
     wow.lua.globals().BragDB.enabled = True
     wow.lua.globals().BragDB.death = False
     wow.lua.globals().BragDB.boss = False
-    wow.die()
+    die(wow)
     wow.end_encounter("Onyxia")
     assert len(wow.taken) == before
     wow.lua.globals().BragDB.death = True
-    wow.die()
+    die(wow)
     assert len(wow.taken) == before + 1 and wow.lua.globals().BragHistory[3].text == "Died in Orgrimmar"
-    wow.die("Hogger")
+    die(wow, "Hogger")
     assert wow.lua.globals().BragHistory[4].text == "Died to Hogger in Orgrimmar"
 
 with tempfile.TemporaryDirectory() as d:
@@ -117,7 +124,7 @@ with tempfile.TemporaryDirectory() as d:
     assert wow.db["boss"] is True and wow.db["death"] is True and wow.db["loot"] is False
     # and the /brag panel has the switches
     wow.slash()
-    assert wow.lua.globals().MOCK_find("FontString", "Boss kills") and wow.lua.globals().MOCK_find("FontString", "Deaths")
+    assert wow.lua.globals().MOCK_find("FontString", "Dungeon and raid runs") and wow.lua.globals().MOCK_find("FontString", "Deaths")
 
 # a new character with no SavedVariables yet gets the defaults
 with tempfile.TemporaryDirectory() as d:
@@ -169,5 +176,93 @@ with tempfile.TemporaryDirectory() as d:
     wow = FakeWoW(d)
     wow.advance(5)
     assert wow.db["companion"] is True and wow.db["enabled"] is True and not wow.lua.globals().BragAppReminder
+
+# WoW saying "you died" twice, or again while you're a ghost, posts and counts one death
+with tempfile.TemporaryDirectory() as d:
+    wow = FakeWoW(d)
+    wow.die("Hogger")
+    wow.fire("PLAYER_DEAD")  # 5 seconds later
+    wow.advance(5)
+    wow.release()
+    wow.advance(60)
+    wow.fire("PLAYER_DEAD")  # a minute later, as a ghost
+    wow.advance(5)
+    assert len(wow.taken) == 1 and wow.char["deaths"] == 1, (wow.taken, wow.char)
+    # the same goes for any event; a test post always goes out
+    wow.turn_in("Bounty on Murlocs")
+    wow.turn_in("Bounty on Murlocs")
+    for _ in range(2):
+        wow.slash()
+        wow.click("Test post")
+    assert len(wow.taken) == 4
+
+# dungeons and raids: no post per boss, one when you leave, with what happened inside
+with tempfile.TemporaryDirectory() as d:
+    wow = FakeWoW(d, player={"name": "Pierre", "level": 22, "zone": "The Barrens"})
+    wow.lua.globals().BragDB.death = False  # only the run posts
+    wow.enter("Wailing Caverns")
+    wow.advance(600)
+    wow.end_encounter("Lady Anacondra")
+    wow.end_encounter("Lord Pythas", killed=False)  # a wipe
+    wow.die("Deviate Lasher")
+    wow.release()  # to the graveyard outside, as a ghost: the run goes on
+    wow.revive("Wailing Caverns")  # the corpse run back in
+    wow.logout()
+    wow.login()  # a /reload or a relog inside keeps the run
+    wow.lua.globals().BragDB.death = False
+    wow.advance(1200)
+    wow.end_encounter("Lord Pythas")
+    assert wow.taken == []
+    wow.leave()
+    assert captions(wow) == ["🏰 Pierre finished Wailing Caverns! · ⚔️ 2 bosses · 1 wipe · 1 death · 30m · Level 22 Shaman · The Barrens"], captions(wow)
+    wow.enter("Ragefire Chasm")
+    wow.leave()  # no boss killed: nothing to brag about
+    wow.enter("Molten Core", raid=True)
+    wow.end_encounter("Lucifron")
+    wow.die()
+    wow.release()
+    wow.revive()  # at the spirit healer, outside: the run is over
+    assert captions(wow)[1:] == ["🐉 Pierre finished the raid Molten Core! · ⚔️ 1 boss · 1 death · 1m · Level 22 Shaman · The Barrens"], captions(wow)
+    assert "run" not in wow.char
+    wow.lua.globals().BragDB.boss = False  # the switch for runs
+    wow.enter("Wailing Caverns")
+    wow.end_encounter("Lady Anacondra")
+    wow.leave()
+    assert len(wow.taken) == 2
+
+# level-ups say how long the level took, how often you died and your /played, without /played spam in chat
+with tempfile.TemporaryDirectory() as d:
+    wow = FakeWoW(d)  # /played at login: 100000 s, this level since 96400
+    g = wow.lua.globals()
+    wow.advance(3605)
+    wow.level_up()
+    die(wow)
+    wow.advance(600)
+    wow.level_up()
+    assert captions(wow) == [
+        "🎉 Thrall reached level 42! · ⏱️ Level 41 took 2h 00m · 1d 4h played · Shaman · Orgrimmar",  # deaths: Brag missed part of 41
+        "💀 Thrall died · Level 42 Shaman · Orgrimmar",
+        "🎉 Thrall reached level 43! · ⏱️ Level 42 took 10m · 1 death · 1d 4h played · Shaman · Orgrimmar",
+    ], captions(wow)
+    assert not any(line.startswith("Total time played") for line in g.MOCK_chat.values())
+    g.RequestTimePlayed()  # the player's own /played still shows
+    wow.advance(1)
+    assert list(g.MOCK_chat.values())[-1].startswith("Total time played")
+    wow.logout()
+    wow.login()
+    g = wow.lua.globals()
+    g.MOCK_noPlayed = True  # the server doesn't answer: posted anyway, a second later
+    wow.level_up()
+    assert captions(wow)[-1] == "🎉 Thrall reached level 44! · ⏱️ no deaths · Shaman · Orgrimmar", captions(wow)
+
+# a big drop: its tooltip is in the screenshot, and the post links the item on Wowhead
+with tempfile.TemporaryDirectory() as d:
+    wow = FakeWoW(d)
+    wow.loot("Krol Blade", 4)
+    wow.turn_in("Bounty on Murlocs")
+    assert wow.tips[0].endswith("|h[Krol Blade]|h|r") and wow.tips[1] is None, wow.tips
+    assert not wow.lua.globals().BragTooltip.IsShown(wow.lua.globals().BragTooltip)
+    payload, _ = read_strip(Image.open(wow.taken[0]))
+    assert caption(payload).startswith("💎 **Thrall** looted [**Krol Blade**](<https://www.wowhead.com/forever/item=19000>) (Epic)")
 
 print("ok")

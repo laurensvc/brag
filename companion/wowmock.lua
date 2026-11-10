@@ -97,6 +97,9 @@ function Region:ClearFocus() end
 function Region:SetFocus() end
 function Region:HighlightText() self.highlighted = true end
 function Region:Click() if self.scripts.OnClick then self.scripts.OnClick(self, "LeftButton") end end
+-- Tooltips
+function Region:SetOwner() end
+function Region:SetHyperlink(link) self.link = link end
 
 function CreateFrame(kind, name, parent)
   local f = newRegion(kind, parent, { events = {} })
@@ -117,6 +120,29 @@ function UnitName() return HOST.player.name, HOST.player.surname end  -- Forever
 function UnitClass() return HOST.player.class, HOST.player.class:upper(), 7 end
 function UnitLevel() return HOST.player.level end
 function GetRealZoneText() return HOST.player.zone end
+-- HOST.player.instance / instanceType ("party", "raid"): inside a dungeon or raid. dead / ghost: dead, released.
+function IsInInstance()
+  if HOST.player.instance then return true, HOST.player.instanceType end
+  return false, "none"
+end
+function GetInstanceInfo()
+  if HOST.player.instance then return HOST.player.instance, HOST.player.instanceType end
+  return HOST.player.zone, "none"
+end
+function UnitIsDeadOrGhost() return HOST.player.dead or HOST.player.ghost or false end
+function UnitIsGhost() return HOST.player.ghost or false end
+-- /played: MOCK_played.total at time 0, levelStart when the current level began. The chat frame shows the
+-- answer before addons get TIME_PLAYED_MSG, as in game; MOCK_noPlayed: the server doesn't answer.
+MOCK_played = { total = 100000, levelStart = 96400 }
+function ChatFrame_DisplayTimePlayed(_, total) print("Total time played: " .. total) end
+function RequestTimePlayed()
+  if MOCK_noPlayed then return end
+  C_Timer.After(0.1, function()
+    local total = MOCK_played.total + math.floor(now)
+    ChatFrame_DisplayTimePlayed(nil, total, total - MOCK_played.levelStart)
+    MOCK_fire("TIME_PLAYED_MSG", total, total - MOCK_played.levelStart)
+  end)
+end
 function UnitGUID(unit) if unit == "player" then return "Player-1-00000001" end end
 function GetTime() return now end
 MOCK_combat = { n = 0 } -- the combat log event being fired, set by MOCK_combatLog

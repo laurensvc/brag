@@ -40,6 +40,7 @@ HEIGHTS = (0, 720, 1080, 1440, 2160)  # 0 = keep the original size
 MARKER_MTIME = 86400  # the time of a Brag.lua only the companion has written (WoW never saved it)
 MAX_BYTES = 8 * 1024 * 1024  # smallest Discord webhook upload limit (servers without boosts)
 QUALITY = {0: "Poor", 1: "Common", 2: "Uncommon", 3: "Rare", 4: "Epic", 5: "Legendary", 6: "Artifact"}
+WOWHEAD_ITEM = "https://www.wowhead.com/forever/item="
 # Strict on purpose: the URL is handed to curl and written back into a Lua file.
 WEBHOOK = re.compile(r"^https://(?:(?:canary|ptb)\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$")
 ENTRY = re.compile(r'\["(\w+)"\]\s*=\s*("(?:[^"\\]|\\.)*"|[^,\n]+),')
@@ -384,31 +385,75 @@ def caption(payload, md=True, funny=False, seed=""):
     if len(f) < 8 or f[0] != "1":
         return ""
     _, kind, name, cls, level, zone, detail, quality = f[:8]
+    extra = numbers(f[8] if len(f) > 8 else "")
     esc = (lambda s: MARKDOWN.sub(r"\\\1", s)) if md else (lambda s: s)
     bold = (lambda s: f"**{esc(s)}**") if md else esc
     who = bold(name or "Someone")
     q = QUALITY.get(int(quality)) if quality.isdigit() else None
-    item = bold("[" + detail + "]") + (f" ({q})" if q else "")  # "[name] (Epic)": the page colors it by quality
+    if md and "item" in extra:  # the item's Wowhead page; <> keeps Discord from adding a preview under the image
+        item = f"[{bold(detail)}](<{WOWHEAD_ITEM}{extra['item']}>)"
+    else:
+        item = bold("[" + detail + "]")  # "[name] (Epic)": the page colors it by quality
+    item += f" ({q})" if q else ""
+    raid = kind == "run" and extra.get("raid") == 1
     lines = FLAVOR.get("death_by" if kind == "death" and detail else kind) if funny else None
     if lines:
         line = lines[zlib.crc32(f"{payload}\t{seed}".encode()) % len(lines)]
         head = line.format(who=who, level=bold(level), quest=bold(detail), item=item, boss=bold(detail),
-                           killer=bold(detail), zone=esc(zone or "Azeroth"))
+                           killer=bold(detail), instance=bold(detail), zone=esc(zone or "Azeroth"))
     else:
         head = {
             "level": f"🎉 {who} reached {bold('level ' + level)}!",
             "quest": f"📜 {who} completed {bold(detail)}",
             "loot": f"💎 {who} looted {item}",
             "boss": f"⚔️ {who} defeated {bold(detail)}!",
+            "run": f"{'🐉' if raid else '🏰'} {who} finished {'the raid ' if raid else ''}{bold(detail)}!",
             "death": f"💀 {who} died to {bold(detail)}" if detail else f"💀 {who} died",
             "test": f"✅ Brag test from {who}: if you can read this, you're all set!",
         }.get(kind)
     if not head:
         return ""
+    stats = stats_line(kind, level, extra)
     info = " · ".join(esc(x) for x in (cls if kind == "level" else f"Level {level} {cls}".strip(), zone) if x)
-    if not info:
-        return head
-    return f"{head}\n-# {info}" if md else f"{head} · {info}"
+    if md:
+        return "\n".join([head] + ([stats] if stats else []) + ([f"-# {info}"] if info else []))
+    return " · ".join(x for x in (head, stats, info) if x)
+
+
+def numbers(field):
+    """The strip's 9th field, "key=value,key=value" (all whole numbers), as a dict; anything malformed is left out."""
+    pairs = (p.partition("=") for p in field.split(","))
+    return {k: int(v) for k, _, v in pairs if k and re.fullmatch(r"-?\d+", v)}
+
+
+def duration(seconds):
+    """1d 14h, 2h 05m, 45m."""
+    m = max(seconds, 60) // 60
+    d, h, m = m // 1440, m // 60 % 24, m % 60
+    return f"{d}d {h}h" if d else f"{h}h {m:02d}m" if h else f"{m}m"
+
+
+def stats_line(kind, level, extra):
+    """The numbers under a level-up or a finished dungeon: "⏱️ Level 22 took 2h 05m · no deaths · 1d 14h played"."""
+    count = lambda n, word: f"{n} {word}" + ("" if n == 1 else "es" if word.endswith("s") else "s")
+    parts = []
+    if kind == "level":
+        if extra.get("took", -1) >= 0 and level.isdigit():
+            parts.append(f"Level {int(level) - 1} took {duration(extra['took'])}")
+        if "deaths" in extra:
+            parts.append(count(extra["deaths"], "death") if extra["deaths"] else "no deaths")
+        if extra.get("played", 0) > 0:
+            parts.append(f"{duration(extra['played'])} played")
+        icon = "⏱️"
+    elif kind == "run":
+        parts.append(count(extra.get("bosses", 0), "boss"))
+        if extra.get("wipes"):
+            parts.append(count(extra["wipes"], "wipe"))
+        parts.append(count(extra["deaths"], "death") if extra.get("deaths") else "no deaths")
+        if extra.get("time", 0) > 0:
+            parts.append(duration(extra["time"]))
+        icon = "⚔️"
+    return f"{icon} " + " · ".join(parts) if parts else ""
 
 
 def open_when_ready(path, timeout=15, sleep=time.sleep):

@@ -2,7 +2,7 @@
 
 You hit level 60, finally get that epic drop, or wipe your guild's first Ragnaros kill into the history books. With **Brag**, your Discord server sees it within seconds: a screenshot of the moment plus a caption saying who did what, where. You don't have to alt-tab, crop or paste anything.
 
-Brag is made for guilds and groups of friends who share a Discord server and want a running feed of each other's progress: dings, loot, boss kills and the occasional embarrassing death.
+Brag is made for guilds and groups of friends who share a Discord server and want a running feed of each other's progress: dings, loot, dungeon and raid runs and the occasional embarrassing death.
 
 ## ⚠️ You also need the free Brag app to post to Discord
 
@@ -29,19 +29,20 @@ Brag watches for five kinds of moments. When one happens, it shows a **big raid-
 
 | Moment | When it triggers | Banner you see |
 |---|---|---|
-| **Level up** | Every time you ding | *Level 42!* |
+| **Level up** | Every time you ding. The post says how long the level took, how many times you died on the way and your total /played | *Level 42!* |
 | **Quest turn-in** | When you hand in a quest | *Quest complete: Bounty on Murlocs* |
-| **Big loot** | When you loot an item of your chosen quality or better (Uncommon, Rare, Epic or Legendary; Epic by default). Quest rewards and mail count too | *Big drop: [Krol Blade]* |
-| **Boss kill** | When your group defeats a dungeon or raid boss. Wipes are never posted | *Boss defeated: Onyxia* |
+| **Big loot** | When you loot an item of your chosen quality or better (Uncommon, Rare, Epic or Legendary; Epic by default). Quest rewards and mail count too. The screenshot shows the item's tooltip, and the post links it on Wowhead | *Big drop: [Krol Blade]* |
+| **Dungeon or raid run** | When you leave a dungeon or raid in which at least one boss died: one post per run, with the bosses killed, wipes, deaths and how long it took. Dying and running back in doesn't end the run. Bosses outside a dungeon (world bosses) still get their own post | *Wailing Caverns done: 8 bosses* |
 | **Death** | When you die. Brag also works out **what killed you**: a mob, a mob's spell, or falling, lava, drowning and so on | *Died to Hogger's Fireball in Elwynn Forest* |
 
 A few more details:
 
 - If a quest turn-in also levels you up, you get **two separate screenshots**, one for each moment.
+- If the game reports the same moment twice (it sometimes does, for deaths), Brag posts it only once.
 - Every moment can be **switched on or off** separately, so you can share your loot but keep your deaths private, or the other way around.
 - Brag keeps an in-game **history** of your last 500 moments, which the companion app shows you.
 - While Brag takes a screenshot, a thin strip of small black and white blocks flashes in the top-left corner for a moment. This strip carries the details (your name, level, zone, item and so on) to the companion app, which **crops it off** before posting. It never shows up on Discord.
-- Brag does nothing in combat or in your interface apart from the banner (and, until it sees the app, a reminder at login). It doesn't change your action bars, chat or unit frames, and it only listens to a few game events.
+- Brag does nothing in combat or in your interface apart from the banner (and, until it sees the app, a reminder at login). It doesn't change your action bars or unit frames, and it only listens to a few game events. It asks the game for your /played at login and at each level-up, and hides the chat lines its own requests cause; typing /played yourself still works.
 
 ## What your Discord server sees
 
@@ -76,7 +77,7 @@ Prefer plain captions? One switch turns the jokes off.
 Type **/brag** to open the settings window:
 
 - **Enabled**: turn Brag on or off completely.
-- **Level ups, Quest turn-ins, Loot, Boss kills, Deaths**: a checkbox for each moment.
+- **Level ups, Quest turn-ins, Loot, Dungeon and raid runs, Deaths**: a checkbox for each moment.
 - **Loot quality**: click to choose the minimum quality: Uncommon, Rare, Epic or Legendary.
 - **Discord webhook URL**: where your posts go (setting it in the companion app is easier).
 - **Test post**: takes a test screenshot so you can check that everything works: *"Brag test from Thrall: if you can read this, you're all set!"*

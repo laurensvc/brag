@@ -1,8 +1,10 @@
 """Funny caption lines for Brag's posts, one list per event. Add as many as you like.
 
 Placeholders: {who} the character, {level} the new level, {quest} the quest, {item} the item (with its quality),
-{boss} the boss, {killer} what killed them, {zone} where it happened. Each line uses only the placeholders its
-event has; "death_by" is for deaths with a known killer (a mob, a mob's spell, or Falling, Lava and so on).
+{boss} the boss (killed outside a dungeon or raid: a world boss), {instance} the dungeon or raid, {killer} what
+killed them, {zone} where it happened. Each line uses only the placeholders its event has; "run" is a finished
+dungeon or raid, "death_by" a death with a known killer (a mob, a mob's spell, or Falling, Lava and so on).
+Level-ups and runs get a line with their numbers (time, deaths, bosses) under the joke.
 Write plain text: Brag adds the bold and escapes names itself, so don't use * _ ~ ` | < > [ ] ( ) here.
 """
 
@@ -138,6 +140,24 @@ FLAVOR = {
         "⚔️ {who} beat {boss}. That was the easy part, now comes the loot drama",
         "⚔️ {boss} down, {who} up. Grats team!",
         "⚔️ {who} defeated {boss}. Back to farming trash for a week",
+    ],
+    "run": [
+        "🏰 {who} made it out of {instance} alive. Mostly",
+        "🏰 {instance}: cleared. {who} is already asking for another run",
+        "🏰 {who} finished {instance}. The loot was, as always, disappointing",
+        "🏰 {who} survived {instance}. The healer needs a long lie down",
+        "🏰 {instance} is done! {who} only pulled extra packs on purpose. Twice",
+        "🏰 {who} and friends ran {instance}. Nobody read the quest text",
+        "🏰 {who} walked out of {instance} with full bags and empty pockets",
+        "🏰 {who} finished {instance}. The repair bill is on its way",
+        "🏰 {instance} complete. {who} would like to thank the tank, grudgingly",
+        "🏰 {who} cleared {instance}. Somebody still rolled Need on everything",
+        "🏰 {who} is out of {instance}. Group disbanded, friendships intact. For now",
+        "🏰 {instance} has been visited by {who}. The bosses did not enjoy it",
+        "🏰 {who} finished {instance} and finally knows where the exit is",
+        "🏰 GG {instance}. {who} sends their regards to the bosses",
+        "🏰 {who} did {instance}. The trash pulls were the real boss",
+        "🏰 {who} came, saw and looted {instance}",
     ],
     "death": [
         "💀 {who} died. Again",

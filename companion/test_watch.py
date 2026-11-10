@@ -112,16 +112,33 @@ assert caption("1\tdeath\tThrall\tShaman\t60\tMolten Core\tRagnaros's Lava_Burst
 assert validate({**DEFAULTS, "death": "no"}) and validate({k: v for k, v in DEFAULTS.items() if k != "boss"})
 assert caption("2\tfuture\tformat") == caption(None) == caption("1\tdance\ta\tb\tc\td\te\tf") == ""
 
+# the 9th field: numbers for the caption. Level-ups and finished dungeons get them on a line of their own
+assert watch.numbers("bosses=3,time=-1,x=,=4,junk,y=1.5") == {"bosses": 3, "time": -1}
+assert [watch.duration(s) for s in (0, 59, 61, 3600, 7500, 86400 + 5 * 3600 + 59)] == ["1m", "1m", "1m", "1h 00m", "2h 05m", "1d 5h"]
+assert caption("1\tlevel\tThrall\tShaman\t42\tOrgrimmar\t\t\tdeaths=0,played=138000,took=7500") == (
+    "🎉 **Thrall** reached **level 42**!\n⏱️ Level 41 took 2h 05m · no deaths · 1d 14h played\n-# Shaman · Orgrimmar")
+assert caption("1\tlevel\tThrall\tShaman\t42\tOrgrimmar\t\t\tdeaths=2", md=False) == (
+    "🎉 Thrall reached level 42! · ⏱️ 2 deaths · Shaman · Orgrimmar")
+assert caption("1\trun\tThrall\tShaman\t30\tThe Barrens\tWailing *Caverns*\t\tbosses=8,deaths=4,raid=0,time=4320,wipes=1") == (
+    "🏰 **Thrall** finished **Wailing \\*Caverns\\***!\n⚔️ 8 bosses · 1 wipe · 4 deaths · 1h 12m\n-# Level 30 Shaman · The Barrens")
+assert caption("1\trun\tThrall\tShaman\t60\t\tMolten Core\t\tbosses=1,deaths=0,raid=1,time=0", md=False) == (
+    "🐉 Thrall finished the raid Molten Core! · ⚔️ 1 boss · no deaths · Level 60 Shaman")
+# a big drop links to the item on Wowhead (on the page: just the name)
+assert caption(LOOT + "\titem=19019").startswith(
+    "💎 **Thrall** looted [**Thunderfury, Blessed Blade of the Windseeker**](<https://www.wowhead.com/forever/item=19019>) (Legendary)\n")
+assert caption(LOOT + "\titem=19019", md=False) == caption(LOOT, md=False)
+
 # funny captions: every line fills in for its event, with names escaped; the post and the page get the same line
 import flavor
 events = {"level": "1\tlevel\tPi*erre\tMage\t10\t\t\t", "quest": QUEST, "loot": LOOT,
           "boss": "1\tboss\tThrall\tShaman\t60\tMolten Core\tRagnaros\t", "death": "1\tdeath\tThrall\tShaman\t60\t\t\t",
+          "run": "1\trun\tThrall\tShaman\t60\tBurning Steppes\tBlackrock Depths\t\tbosses=3",
           "death_by": "1\tdeath\tThrall\tShaman\t60\t\tHogger\t"}
 assert set(flavor.FLAVOR) == set(events) and all(len(lines) >= 10 for lines in flavor.FLAVOR.values())
 for kind, lines in flavor.FLAVOR.items():
     for line in lines:
         assert not watch.MARKDOWN.search(line.replace("{", "").replace("}", "")), line  # plain text, see flavor.py
-        line.format(who="", level="", quest="", item="", boss="", killer="", zone="")  # no unknown placeholders
+        line.format(who="", level="", quest="", item="", boss="", instance="", killer="", zone="")  # no unknown placeholders
     assert len(set(lines)) == len(lines), kind  # no line twice
     seen = {caption(events[kind], md=False, funny=True, seed=str(i)) for i in range(2000)}
     assert len(seen) == len(lines), (kind, len(seen))  # every line comes up

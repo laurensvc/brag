@@ -65,10 +65,27 @@ local function clean(s)
   return (tostring(s or ""):gsub("[\t\r\n]", " "))
 end
 
+-- A big drop's tooltip goes in the screenshot, so Discord sees the item's stats. Brag has its own tooltip frame,
+-- so the player's mouseover tooltip is left alone.
+local tooltip = CreateFrame("GameTooltip", "BragTooltip", UIParent, "GameTooltipTemplate")
+tooltip:SetFrameStrata("TOOLTIP")
+tooltip:SetScale(1.25)
+
+local function showTooltip(link)
+  tooltip:Hide()
+  if not link then return end
+  tooltip:SetOwner(UIParent, "ANCHOR_NONE")
+  tooltip:ClearAllPoints()
+  tooltip:SetPoint("LEFT", UIParent, "CENTER", 100, 40) -- right of your character
+  tooltip:SetHyperlink(link)
+  tooltip:Show()
+end
+
 -- One screenshot at a time: a quest turn-in often levels you up too, and each needs its own strip.
 local queue, current = {}, nil
 local function nextShot()
   current = tremove(queue, 1)
+  showTooltip(current and current.link)
   if not current then return strip:Hide() end
   RaidNotice_AddMessage(RaidWarningFrame, current.text, ChatTypeInfo["RAID_WARNING"])
   drawStrip(current.payload)
@@ -91,15 +108,25 @@ local function playerName()
   return first
 end
 
--- kind: level | quest | loot | boss | death | test. detail: quest title, item name, boss name or killer.
-local function brag(kind, text, detail, quality, level)
+-- kind: level | quest | loot | boss | run | death | test. detail: quest title, item name, boss name, dungeon or
+-- raid name, or killer. extra: numbers for the caption, {key = number}; they travel as the 9th field, "k=v,k=v".
+-- link: an item whose tooltip goes in the screenshot.
+local lastKey, lastAt
+local function brag(kind, text, detail, quality, level, extra, link)
+  -- WoW sometimes fires an event twice: the same thing again within 30 seconds is only posted once.
+  local key = table.concat({ kind, level or UnitLevel("player"), kind == "death" and "" or tostring(detail) }, "\t")
+  if kind ~= "test" and key == lastKey and GetTime() - lastAt < 30 then return end
+  lastKey, lastAt = key, GetTime()
   tinsert(BragHistory, { time = time(), text = text }) -- the companion app shows this history
   if #BragHistory > 500 then tremove(BragHistory, 1) end -- keep the saved file small
+  local numbers = {}
+  for k, v in pairs(extra or {}) do numbers[#numbers + 1] = k .. "=" .. math.floor(v) end
+  table.sort(numbers)
   local payload = table.concat({
     "1", kind, clean(playerName()), clean((UnitClass("player"))), level or UnitLevel("player"),
-    clean(GetRealZoneText()), clean(detail):sub(1, 120), quality or "",
+    clean(GetRealZoneText()), clean(detail):sub(1, 100), quality or "", table.concat(numbers, ","),
   }, "\t"):sub(1, 250) -- the length has to fit in one byte
-  tinsert(queue, { text = text, payload = payload })
+  tinsert(queue, { text = text, payload = payload, link = link })
   if not current then nextShot() end
 end
 
@@ -197,10 +224,56 @@ local function needsApp()
   return db and not db.companion
 end
 
-local questTitle
+-- Per character (BragChar, saved per character), so it survives /reload and logging out:
+--   run: the dungeon or raid you're in, {name, raid, start, last (last boss kill), bosses, wipes, deaths}.
+--   levelStart: your /played when this level began. deaths: deaths at this level; deathsLevel is the level they
+--   were counted from the start of (nil when Brag didn't see the whole level, so the count would be too low).
+local char
+
+-- A run ends when you leave the instance alive, and is posted if a boss died. Dying and releasing takes you
+-- outside as a ghost; the run goes on, since the corpse run brings you back in.
+local function checkRun()
+  local inside, kind = IsInInstance()
+  local name = inside and (kind == "party" or kind == "raid") and GetInstanceInfo() or nil
+  local run = char.run
+  if run and run.name == name then return end -- back in: after a corpse run, a /reload or a relog
+  if run and not name and UnitIsDeadOrGhost("player") then return end
+  char.run = name and { name = name, raid = kind == "raid", start = time(), bosses = 0, wipes = 0, deaths = 0 } or nil
+  if run and run.bosses > 0 and db.enabled and db.boss then
+    C_Timer.After(2, function() -- after the loading screen, once the world has drawn
+      brag("run", run.name .. " done: " .. run.bosses .. (run.bosses == 1 and " boss" or " bosses"), run.name, nil,
+        nil, { bosses = run.bosses, wipes = run.wipes, deaths = run.deaths, time = run.last - run.start,
+               raid = run.raid and 1 or 0 })
+    end)
+  end
+end
+
+-- /played, for the level-up post. Brag asks at login and at each level-up, and hides the chat lines it causes.
+local quietUntil, ding = 0, nil
+if ChatFrame_DisplayTimePlayed then
+  local show = ChatFrame_DisplayTimePlayed
+  ChatFrame_DisplayTimePlayed = function(...)
+    if GetTime() >= quietUntil then return show(...) end
+  end
+end
+local function requestPlayed()
+  quietUntil = GetTime() + 5
+  RequestTimePlayed()
+end
+
+local function postLevel(d)
+  if ding ~= d then return end
+  ding = nil
+  if db.enabled and db.level then brag("level", "Level " .. d.level .. "!", nil, nil, d.level, d.extra) end
+end
+
+local questTitle, lastDeath
 local f = CreateFrame("Frame")
 f:RegisterEvent("ADDON_LOADED")
 f:RegisterEvent("PLAYER_ENTERING_WORLD")
+f:RegisterEvent("PLAYER_ALIVE")
+f:RegisterEvent("PLAYER_UNGHOST")
+f:RegisterEvent("TIME_PLAYED_MSG")
 f:RegisterEvent("PLAYER_LEVEL_UP")
 f:RegisterEvent("QUEST_COMPLETE")
 f:RegisterEvent("QUEST_TURNED_IN")
@@ -214,24 +287,72 @@ f:SetScript("OnEvent", function(_, event, arg1, arg2, _, _, arg5)
   if event == "ADDON_LOADED" and arg1 == ADDON then
     BragDB = BragDB or {}
     BragHistory = BragHistory or {}
+    BragChar = BragChar or {}
     for k, v in pairs(DEFAULTS) do
       if BragDB[k] == nil then BragDB[k] = v end
     end
-    db = BragDB
+    db, char = BragDB, BragChar
+  elseif not db then
+    return -- an event before Brag's own ADDON_LOADED
   elseif event == "PLAYER_ENTERING_WORLD" then
-    if arg1 and needsApp() and db.remindApp ~= false then -- arg1: a login, not a /reload or a loading screen
-      print("|cffffd100Brag:|r screenshots are taken, but posting them to Discord needs the free Brag app. "
-        .. "Type /brag and click Get the app.")
-      C_Timer.After(4, showReminder) -- after the loading screen and the login spam
+    if arg1 then -- arg1: a login, not a /reload or a loading screen
+      if char.deathsLevel ~= UnitLevel("player") then char.deaths, char.deathsLevel = 0, nil end -- leveled elsewhere
+      C_Timer.After(3, requestPlayed) -- after the login spam
+      if needsApp() and db.remindApp ~= false then
+        print("|cffffd100Brag:|r screenshots are taken, but posting them to Discord needs the free Brag app. "
+          .. "Type /brag and click Get the app.")
+        C_Timer.After(4, showReminder) -- after the loading screen and the login spam
+      end
+    end
+    checkRun()
+  elseif event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
+    checkRun() -- back alive outside the instance (a spirit healer): the run is over
+  elseif event == "TIME_PLAYED_MSG" then -- total, this level
+    quietUntil = 0
+    if ding then
+      ding.extra.played = arg1
+      if char.levelStart then ding.extra.took = arg1 - char.levelStart end
+      char.levelStart = arg1
+      postLevel(ding)
+    else
+      char.levelStart = arg1 - arg2
+    end
+  elseif event == "PLAYER_LEVEL_UP" then -- UnitLevel still says the old level here
+    if ding then postLevel(ding) end -- two levels at once: the first goes without /played
+    local d = { level = arg1, extra = { deaths = char.deathsLevel == arg1 - 1 and char.deaths or nil } }
+    char.deaths, char.deathsLevel, ding = 0, arg1, d
+    requestPlayed()
+    C_Timer.After(1, function() -- no answer: post without /played
+      if ding == d then
+        char.levelStart = nil
+        postLevel(d)
+      end
+    end)
+  elseif event == "ENCOUNTER_END" and char.run then -- encounterID, name, difficulty, size, success
+    if arg5 == 1 then
+      char.run.bosses, char.run.last = char.run.bosses + 1, time()
+    else
+      char.run.wipes = char.run.wipes + 1
+    end
+  elseif event == "PLAYER_DEAD" and (UnitIsGhost("player") or GetTime() - (lastDeath or -60) < 30) then
+    return -- WoW sometimes says it again: a ghost can't die, and a second death this soon is the same one
+  elseif event == "PLAYER_DEAD" then
+    lastDeath = GetTime()
+    char.deaths = (char.deaths or 0) + 1
+    if char.run then char.run.deaths = char.run.deaths + 1 end
+    if db.enabled and db.death then
+      C_Timer.After(0.2, function() -- the killing blow can reach the combat log just after this event
+        local killer = lastHit and GetTime() - lastHit.at < 10 and lastHit.killer -- nothing recent: unknown
+        lastHit = nil
+        brag("death", (killer and "Died to " .. killer .. " in " or "Died in ") .. GetRealZoneText(), killer)
+      end)
     end
   elseif event == "SCREENSHOT_SUCCEEDED" or event == "SCREENSHOT_FAILED" then
     if current and current.taken then nextShot() end -- ignores screenshots the player takes
-  elseif not (db and db.enabled) then
+  elseif not db.enabled then
     return
   elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
     if db.death then noteHit() end
-  elseif event == "PLAYER_LEVEL_UP" and db.level then
-    brag("level", "Level " .. arg1 .. "!", nil, nil, arg1) -- UnitLevel still says the old level here
   elseif event == "QUEST_COMPLETE" then
     questTitle = GetTitleText() -- quest reward dialog is open; title is gone after turn-in
   elseif event == "QUEST_TURNED_IN" and db.quest then
@@ -243,19 +364,14 @@ f:SetScript("OnEvent", function(_, event, arg1, arg2, _, _, arg5)
         local link = arg1:match("|c.-|Hitem:.-|h|r")
         local quality = link and linkQuality(link)
         if quality and quality >= db.minQuality then
-          brag("loot", "Big drop: " .. link, link:match("|h%[(.-)%]|h"), quality)
+          local id = tonumber(link:match("item:(%d+)"))
+          brag("loot", "Big drop: " .. link, link:match("|h%[(.-)%]|h"), quality, nil, { item = id }, link)
         end
         return
       end
     end
-  elseif event == "ENCOUNTER_END" and db.boss and arg5 == 1 then -- encounterID, name, difficulty, size, success
+  elseif event == "ENCOUNTER_END" and db.boss and arg5 == 1 then -- outside a dungeon or raid: a world boss
     brag("boss", "Boss defeated: " .. (arg2 or "?"), arg2 or "?")
-  elseif event == "PLAYER_DEAD" and db.death then
-    C_Timer.After(0.2, function() -- the killing blow can reach the combat log just after this event
-      local killer = lastHit and GetTime() - lastHit.at < 10 and lastHit.killer -- nothing recent: unknown
-      lastHit = nil
-      brag("death", (killer and "Died to " .. killer .. " in " or "Died in ") .. GetRealZoneText(), killer)
-    end)
   end
 end)
 
@@ -293,7 +409,7 @@ local function buildPanel()
   checkbox("Level ups", "level")
   checkbox("Quest turn-ins", "quest")
   local loot = checkbox("Loot", "loot")
-  checkbox("Boss kills", "boss")
+  checkbox("Dungeon and raid runs", "boss")
   checkbox("Deaths", "death")
 
   local q = CreateFrame("Button", nil, p, "UIPanelButtonTemplate")
