@@ -44,7 +44,8 @@ jobs:
       - run: python test_desktop.py
         working-directory: companion
       - name: Install Inno Setup
-        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+        # brag.iss needs Inno Setup 6.6 or newer; the runner's copy may be older, so upgrade (or install) it
+        run: choco upgrade innosetup -y --no-progress
       - run: ./windows/build.ps1
       - uses: actions/upload-artifact@v7
         with:

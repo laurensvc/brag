@@ -2,7 +2,7 @@
 ## Title: Brag
 ## IconTexture: Interface\AddOns\Brag\icon
 ## Notes: Screenshots level-ups, quest turn-ins, big drops, dungeon and raid runs and deaths for Discord. Posting needs the free Brag app on your PC. Type /brag for settings.
-## Version: 0.9.0
+## Version: 0.10.0
 ## SavedVariables: BragDB, BragHistory
 ## SavedVariablesPerCharacter: BragChar
 Brag.lua

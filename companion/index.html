@@ -32,6 +32,12 @@
     border-bottom: 1px solid; border-image: linear-gradient(90deg, rgba(227, 183, 90, .8), transparent) 1;
   }
   #notice { font: 700 15px/1.3 var(--title); color: var(--gold-soft); text-shadow: 0 1px 2px #000; }
+  #update { margin-left: auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  #update p { margin: 0; font: 700 15px/1.3 var(--title); color: var(--gold); text-shadow: 0 1px 2px #000; }
+  #update p.failed { color: var(--bad); }
+  #update button { margin: 0; }
+  .version { margin: 0; font-size: 17px; }
+  .version b { font-family: var(--title); color: var(--gold); letter-spacing: .04em; }
   #notice.failed, #notice.off { color: var(--bad); text-shadow: 0 0 10px rgba(255, 60, 20, .5), 0 1px 0 #000; }
   main { padding: 20px 24px 24px; max-width: 1440px; margin: 0 auto; }
   .panel.settings { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 0 24px; align-items: start; }
@@ -169,7 +175,9 @@
 </style>
 </head>
 <body>
-<header><h1>Brag</h1><span id="notice" role="status"></span></header>
+<header><h1>Brag</h1><span id="notice" role="status"></span>
+  <div id="update" hidden><p id="updateText" role="status"></p><button type="button" id="updateButton">Update</button></div>
+</header>
 <nav id="tabs" role="tablist" aria-label="Brag">
   <button type="button" role="tab" class="tab" id="tab-settings" data-tab="settings" aria-controls="panel-settings">Settings</button>
   <button type="button" role="tab" class="tab" id="tab-screenshots" data-tab="screenshots" aria-controls="panel-screenshots">Screenshots</button>
@@ -278,6 +286,16 @@
         <p class="hint">These apply right away, even while WoW is running.</p>
       </form>
     </details>
+    <section class="card" id="version" hidden>
+      <h2>Brag version</h2>
+      <p class="version">You have <b id="appVersion"></b></p>
+      <p class="hint">Brag checks for a new version on its own every few hours. When there is one, one click updates it: Brag restarts and keeps all your settings.</p>
+      <div class="buttons">
+        <button type="button" id="checkUpdate">Check for updates</button>
+        <button type="button" id="installUpdate" hidden>Update</button>
+      </div>
+      <p class="msg" id="vmsg" role="status"></p>
+    </section>
     </div>
   </div>
   <div class="panel screenshots" id="panel-screenshots" role="tabpanel" aria-labelledby="tab-screenshots" hidden>
@@ -364,10 +382,50 @@
     b.addEventListener("click", () => b.closest("li").classList.add("open"));
   }
 
+  // A newer Brag for Windows: one click downloads it, installs it and restarts Brag
+  // The header bar shows it everywhere; the Brag version card (Settings) also checks on demand.
+  function renderUpdate(st) {
+    const u = st.update;
+    $("#version").hidden = !st.appVersion;  // only the Windows app has a version to update
+    $("#appVersion").textContent = "Brag " + st.appVersion;
+    $("#update").hidden = !u;
+    $("#installUpdate").hidden = !u || u.busy;
+    if (!u) return;
+    $("#updateText").className = u.error ? "failed" : "";
+    $("#updateText").textContent = u.error || (u.busy ? `Updating to Brag ${u.version}… Brag restarts in a moment.` : `Brag ${u.version} is out`);
+    $("#updateButton").hidden = u.busy;
+    $("#updateButton").textContent = u.error ? "Try again" : "Update";
+    $("#installUpdate").textContent = `Update to ${u.version}`;
+  }
+  async function installUpdate() {
+    $("#updateButton").hidden = $("#installUpdate").hidden = true;
+    try {
+      await fetch("/api/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    } catch {}
+    refresh();
+  }
+  $("#updateButton").addEventListener("click", installUpdate);
+  $("#installUpdate").addEventListener("click", installUpdate);
+  $("#checkUpdate").addEventListener("click", async () => {
+    const button = $("#checkUpdate");
+    button.disabled = true;
+    setMsg("#vmsg", "", "Checking…");
+    try {
+      const res = await (await fetch("/api/update/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
+      setMsg("#vmsg", res.kind === "current" ? "posted" : res.kind === "failed" ? "failed" : "", res.message);
+      refresh();
+    } catch {
+      setMsg("#vmsg", "failed", UNREACHABLE);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   function render(st) {
     $("#notice").textContent = st.status.kind === "ok" ? "" : st.status.message;  // the tray shows the same
     $("#notice").className = st.status.kind;
     renderSetup(st);
+    renderUpdate(st);
     $("#settings button[type=submit]").disabled = !st.found;
     $("#settingsHint").textContent = st.found
       ? "Close WoW before saving here: WoW puts back its own settings when you log out. Or change them in WoW with /brag."
@@ -420,7 +478,7 @@
       if (!tabChosen && !(done.folder && done.addon && done.webhook)) showTab("settings");
       if (!st.gameDir && st.canChooseFolder) askForFolder();
     }
-    const key = JSON.stringify([st.status, st.gameDir, st.setup, st.found, st.shots, st.history, st.log]);
+    const key = JSON.stringify([st.status, st.update, st.gameDir, st.setup, st.found, st.shots, st.history, st.log]);
     if (key !== last) { last = key; render(st); }  // only re-render when something changed, so images don't flicker
   }
 

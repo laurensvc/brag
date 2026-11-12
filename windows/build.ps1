@@ -40,5 +40,7 @@ if (-not $iscc) {
   Write-Warning 'Inno Setup not found, so no installer. Get it with: winget install JRSoftware.InnoSetup'
   exit 0
 }
-Run $iscc /Qp "/DAppVersion=$version" "/DSourceDir=$dist\Brag" "/DOutputDir=$dist" "/DIconFile=$build\brag.ico" (Join-Path $PSScriptRoot 'brag.iss')
+Run $py (Join-Path $PSScriptRoot 'installer_art.py') (Join-Path $build 'installer-art')
+Run $iscc /Qp "/DAppVersion=$version" "/DSourceDir=$dist\Brag" "/DOutputDir=$dist" "/DIconFile=$build\brag.ico" `
+  "/DArtDir=$build\installer-art" (Join-Path $PSScriptRoot 'brag.iss')
 Write-Host "Built $dist\BragSetup.exe"

@@ -8,8 +8,9 @@
 
 Closing the window keeps Brag running in the tray; Quit in the tray menu stops it. Settings, the post log and
 brag.log live in %APPDATA%\\Brag. windows\\build.ps1 turns this into Brag.exe and BragSetup.exe.
+Brag.exe checks GitHub for a newer release and offers to update itself (the tray menu and the page).
 """
-import argparse, ctypes, json, os, shutil, string, sys, threading, time, urllib.request, webbrowser, winreg
+import argparse, ctypes, json, os, shutil, string, subprocess, sys, tempfile, threading, time, urllib.request, webbrowser, winreg
 from brag_icon import make_icon, write_ico
 import watch
 
@@ -24,6 +25,11 @@ COLORS = {"ok": (232, 185, 84), "idle": (128, 120, 108), "failed": (239, 107, 91
 # The Edge WebView2 runtime the window needs; Microsoft's documented way to check it's installed.
 WEBVIEW2 = r"Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 WEBVIEW2_DOWNLOAD = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+# Updates: the newest GitHub release's BragSetup.exe (release.yml publishes it under that name).
+RELEASES = "https://api.github.com/repos/laurensvc/brag/releases/latest"  # brag.iss AppPublisherURL's repo
+SETUP = "BragSetup.exe"
+CHECK_EVERY = 6 * 3600  # seconds between update checks
+APP_VERSION = watch.addon_version(watch.ADDON)  # the app and its bundled addon are released together
 NOT_WOW = "That isn't a WoW folder. Pick _forever_ in your WoW install: the one with Interface and WTF in it."
 
 window = icon = None
@@ -31,6 +37,7 @@ ICONS = {}  # tray icon image per color name, made at startup
 icon_color = None  # the color name the tray icon shows now
 warned_no_webhook = False  # the "no webhook yet" notification shows once per session
 quitting = False
+update_url = None  # where to download the BragSetup.exe that watch.UPDATE offers
 
 
 # --- the WoW folder ---
@@ -179,6 +186,115 @@ def set_autostart(on):
                 winreg.DeleteValue(key, RUN_VALUE)
             except FileNotFoundError:
                 pass
+
+
+# --- updates ---
+
+def setup_in(release):
+    """(version, BragSetup.exe download URL) from a GitHub release; None if it has no installer."""
+    version = str(release.get("tag_name") or "").removeprefix("v")
+    url = next((a.get("browser_download_url") for a in release.get("assets") or [] if a.get("name") == SETUP), None)
+    return (version, url) if version and url else None
+
+
+def latest_release():
+    """The newest release on GitHub, as setup_in() gives it. Raises OSError or ValueError."""
+    req = urllib.request.Request(RELEASES, headers={"User-Agent": "Brag", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return setup_in(json.load(r))
+
+
+def check_for_update(latest=latest_release, notify=True):
+    """Ask GitHub for a newer Brag and offer it: the tray menu, the page and (notify) one notification per
+    version. Returns ("update" | "current" | "failed", what to tell the player). Never raises."""
+    global update_url
+    try:
+        found = latest()
+    except (OSError, ValueError) as e:  # offline, GitHub down or rate limited: try again later
+        watch.say(f"Couldn't check for a Brag update: {e}")
+        return "failed", f"Couldn't reach GitHub to check: {e}"
+    if not found or watch.version_key(found[0]) <= watch.version_key(APP_VERSION):
+        return "current", f"You have the newest Brag ({APP_VERSION})."
+    version, update_url = found
+    if watch.UPDATE and watch.UPDATE["version"] == version:
+        return "update", f"Brag {version} is out."
+    watch.UPDATE = {"version": version, "busy": False, "error": ""}
+    watch.say(f"Brag {version} is out (this is {APP_VERSION}): click Update at the top of the page, or in the tray menu")
+    if icon:
+        icon.update_menu()
+        if notify:
+            icon.notify(f"Brag {version} is out. Click Update in the Brag tray menu or at the top of its page.",
+                        "A new Brag is available")
+    return "update", f"Brag {version} is out."
+
+
+def check_from_tray(*_):
+    """The tray's Check for updates: the answer comes as a notification."""
+    def check():
+        kind, text = check_for_update(notify=False)
+        icon.notify(text + (" Click Update in this menu to install it." if kind == "update" else ""), "Brag updates")
+    threading.Thread(target=check, daemon=True, name="update check").start()
+
+
+def keep_checking_for_updates():
+    time.sleep(30)  # after startup, which has more important things to do
+    while True:
+        check_for_update()
+        time.sleep(CHECK_EVERY)
+
+
+def download(url, path):
+    """Download url to path, all or nothing. Raises OSError."""
+    req = urllib.request.Request(url, headers={"User-Agent": "Brag"})
+    part = path + ".part"
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
+            shutil.copyfileobj(r, f)
+            size, expected = f.tell(), r.headers.get("Content-Length")
+        if expected and size != int(expected):
+            raise OSError(f"the download stopped after {size} of {expected} bytes")
+        with open(part, "rb") as f:
+            if f.read(2) != b"MZ":
+                raise OSError("the download isn't a Windows program")
+        os.replace(part, path)
+    finally:
+        if os.path.exists(part):
+            os.remove(part)
+
+
+def run_setup(path):
+    """Start BragSetup.exe on its own: silent, it waits for Brag to quit, installs, and starts the new Brag
+    (brag.iss InitializeSetup and Relaunch)."""
+    subprocess.Popen([path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/RELAUNCH"], close_fds=True,
+                     creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+
+
+def install_update(*_):
+    """The Update button and tray item: install watch.UPDATE in the background."""
+    update = watch.UPDATE
+    if not update or update["busy"]:
+        return
+    if not getattr(sys, "frozen", False):  # BragSetup.exe would install a second Brag next to this one
+        update.update(error="This Brag runs from source: update it with git pull.")
+        return
+    update.update(busy=True, error="")
+    threading.Thread(target=update_now, args=(update,), daemon=True, name="update").start()
+
+
+def update_now(update, get=download, run=run_setup, quit=None):
+    """Download and start the new BragSetup.exe, then quit so it can replace Brag. A failure is shown on the page."""
+    version = update["version"]
+    watch.say(f"Downloading Brag {version}")
+    try:
+        path = os.path.join(tempfile.gettempdir(), f"BragSetup-{version}.exe")
+        get(update_url, path)
+        run(path)
+    except OSError as e:
+        update.update(busy=False, error=f"Couldn't update: {e}. Try again, or download BragSetup.exe from GitHub.")
+        watch.say(f"Couldn't update to Brag {version}: {e}", "failed")
+        return
+    watch.say(f"Installing Brag {version}: Brag restarts in a few seconds")
+    (quit or quit_app)()
 
 
 # --- tray ---
@@ -350,7 +466,7 @@ def main():
     if browser and not args.browser:
         watch.say("Microsoft Edge WebView2 isn't installed: Brag shows its page in your browser")
         warn_no_webview2()
-    watch.say(f"Brag started, page at {URL}" + ("" if game else ". Choose your WoW folder under Settings."))
+    watch.say(f"Brag {APP_VERSION} started, page at {URL}" + ("" if game else ". Choose your WoW folder under Settings."))
     threading.Thread(target=server.serve_forever, daemon=True, name="page").start()
 
     ICONS.update({k: make_icon(c) for k, c in COLORS.items()})
@@ -360,12 +476,22 @@ def main():
         pystray.MenuItem("Open Screenshots folder", open_screenshots, enabled=lambda _: bool(watch.GAME_DIR)),
         pystray.MenuItem("Start with Windows", lambda: set_autostart(not autostart()), checked=lambda _: autostart()),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem(lambda _: f"Update to Brag {watch.UPDATE['version']}" if watch.UPDATE else "Update",
+                         install_update, visible=lambda _: bool(watch.UPDATE),
+                         enabled=lambda _: bool(watch.UPDATE) and not watch.UPDATE["busy"]),
+        pystray.MenuItem(f"Check for updates (Brag {APP_VERSION})", check_from_tray,
+                         visible=lambda _: not watch.UPDATE),
         pystray.MenuItem("Quit", quit_app),
     ))
     watch.LISTENERS.append(on_result)
     watch.ON_SHOW = show
     watch.ON_FOLDER = use_folder
+    watch.ON_UPDATE = install_update
+    watch.ON_CHECK = lambda: check_for_update(notify=False)  # the page shows the answer itself
+    watch.APP_VERSION = APP_VERSION
     threading.Thread(target=keep_refreshing, daemon=True, name="status").start()
+    if getattr(sys, "frozen", False):  # only the installed Brag.exe updates itself, not Brag run from source
+        threading.Thread(target=keep_checking_for_updates, daemon=True, name="updates").start()
     hidden = args.tray and bool(game)
     if browser:
         if not hidden:

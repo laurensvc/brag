@@ -1,5 +1,5 @@
 # Windows only: the tray app's own logic (the window and tray icon themselves are checked by hand).
-import os, struct, tempfile
+import os, struct, sys, tempfile, urllib.request
 from PIL import Image
 import desktop, watch
 
@@ -123,5 +123,77 @@ with tempfile.TemporaryDirectory() as cli, tempfile.TemporaryDirectory() as app:
 a = desktop.parse_args(["--tray", "--import", "C:/old brag/companion", "--unknown"])
 assert a.tray and not a.browser and a.import_from == "C:/old brag/companion" and a.write_icon is None
 assert not desktop.parse_args([]).tray
+
+# updates: the newest GitHub release's BragSetup.exe, offered when it's newer than this Brag
+asset = {"name": "BragSetup.exe", "browser_download_url": "https://github.com/x/BragSetup.exe"}
+assert desktop.setup_in({"tag_name": "v1.10.0", "assets": [{"name": "Brag-1.10.0.zip"}, asset]}) == \
+    ("1.10.0", "https://github.com/x/BragSetup.exe")
+assert desktop.setup_in({"tag_name": "v1.10.0", "assets": [{"name": "Brag-1.10.0.zip"}]}) is None
+assert desktop.setup_in({}) is None
+assert desktop.APP_VERSION and desktop.APP_VERSION == watch.addon_version(watch.ADDON)
+real_version = desktop.APP_VERSION
+desktop.APP_VERSION = "1.9.0"
+try:
+    current = ("current", "You have the newest Brag (1.9.0).")
+    assert desktop.check_for_update(lambda: ("1.9.0", "u")) == current  # the same version
+    assert desktop.check_for_update(lambda: ("1.8.5", "u")) == current  # older
+    assert desktop.check_for_update(lambda: None) == current  # a release without an installer
+    assert watch.UPDATE is None
+
+    def offline():
+        raise OSError("no network")
+    kind, text = desktop.check_for_update(offline)
+    assert kind == "failed" and "no network" in text
+    assert watch.UPDATE is None and "no network" in watch.LINES[-1]["text"]
+    newer = desktop.check_for_update(lambda: ("1.10.0", "https://github.com/x/BragSetup.exe"))  # 10 > 9, not "1.10" < "1.9"
+    assert newer == ("update", "Brag 1.10.0 is out.")
+    assert watch.UPDATE == {"version": "1.10.0", "busy": False, "error": ""}
+    assert desktop.update_url == "https://github.com/x/BragSetup.exe"
+    said = len(watch.LINES)
+    assert desktop.check_for_update(lambda: ("1.10.0", "https://github.com/x/BragSetup.exe")) == newer
+    assert len(watch.LINES) == said  # told once per version
+    assert watch.state(None)["update"]["version"] == "1.10.0"  # the page shows it
+    assert watch.state(None)["appVersion"] is None  # set by desktop.main; the command-line companion has none
+
+    # Brag run from source doesn't install BragSetup.exe next to itself
+    desktop.install_update()
+    assert not watch.UPDATE["busy"] and "git pull" in watch.UPDATE["error"]
+    watch.UPDATE["error"] = ""
+
+    # Update: download, start Setup, quit. A failed download keeps Brag running and says so on the page.
+    calls = []
+    def broken(url, path):
+        raise OSError("the download stopped after 5 of 10 bytes")
+    watch.UPDATE["busy"] = True
+    desktop.update_now(watch.UPDATE, broken, calls.append, lambda: calls.append("quit"))
+    assert calls == [] and not watch.UPDATE["busy"] and "5 of 10 bytes" in watch.UPDATE["error"]
+    desktop.update_now(watch.UPDATE, lambda url, path: calls.append(url), calls.append, lambda: calls.append("quit"))
+    assert calls[0] == "https://github.com/x/BragSetup.exe" and calls[1].endswith("BragSetup-1.10.0.exe")
+    assert calls[2] == "quit"
+finally:
+    desktop.APP_VERSION, watch.UPDATE, desktop.update_url = real_version, None, None
+with tempfile.TemporaryDirectory() as d:  # a download that isn't a program is refused, and nothing is left
+    path = os.path.join(d, "BragSetup.exe")
+    with open(os.path.join(d, "page.html"), "wb") as f:
+        f.write(b"<html>rate limited</html>")
+    try:
+        desktop.download("file:" + urllib.request.pathname2url(os.path.join(d, "page.html")), path)
+        assert False, "should refuse"
+    except OSError as e:
+        assert "isn't a Windows program" in str(e) and os.listdir(d) == ["page.html"]
+    with open(os.path.join(d, "setup.exe"), "wb") as f:
+        f.write(b"MZ" + b"x" * 1000)
+    desktop.download("file:" + urllib.request.pathname2url(os.path.join(d, "setup.exe")), path)
+    assert os.path.getsize(path) == 1002
+
+# the installer's pictures: the aspect ratios Inno Setup keeps (brag.iss), at least its recommended sizes
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "windows"))
+import installer_art
+with tempfile.TemporaryDirectory() as d:
+    installer_art.write(d)
+    for name, ratio, least in (("wizard-back.png", 497 / 360, 596), ("wizard-image.png", 164 / 314, 202),
+                               ("wizard-small.png", 1, 58)):
+        with Image.open(os.path.join(d, name)) as img:
+            assert abs(img.width / img.height - ratio) < .01 and img.width >= least, (name, img.size)
 
 print("ok")

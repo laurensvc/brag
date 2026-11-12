@@ -93,6 +93,7 @@ Type **/brag** to open the settings window:
 - waits in the system tray next to the clock and posts each new screenshot **within a few seconds**;
 - shows your **screenshots, your Brag history and a log of every post** in one window;
 - can **pause posting** with one click, and can **start with Windows**;
+- **updates itself**: when a new version is out, one click on **Update** installs it;
 - **retries** if Discord has a hiccup, and shows a Windows notification if a post really fails;
 - shrinks big screenshots (1440p, 4K) to 1080p by default, so posts load fast on Discord;
 - can optionally clean up old screenshots after a number of days.

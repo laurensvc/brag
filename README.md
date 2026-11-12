@@ -26,6 +26,8 @@ That's all. More about the tray app:
 - click the icon to open the Brag window (setup, screenshots, history and a log of every post);
 - closing the window keeps Brag running in the tray; right-click → **Quit** stops it;
 - right-click also has **Pause posting**, **Open Screenshots folder** and **Start with Windows**;
+- when a new Brag is out, it tells you: click **Update** at the top of the window (or in the tray menu) and it
+  installs itself and restarts, settings kept;
 - the icon is gold while it works, grey when paused or not set up yet (hover it to see why), and red with a
   Windows notification when a post fails.
 

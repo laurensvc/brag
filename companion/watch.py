@@ -58,6 +58,10 @@ LISTENERS = []  # called with (name, status, plain caption) after each screensho
 ON_SHOW = None  # POST /api/show calls this: a second Brag.exe asks the first to show its window
 ON_FOLDER = None  # POST /api/folder calls this with a path: returns an error message, or None once it's in use
 LAST_FAILURE = None  # why the last post failed, until a post works
+UPDATE = None  # a newer Brag for Windows: {"version", "busy" (downloading it), "error"}; set by desktop.py
+ON_UPDATE = None  # POST /api/update calls this: download and install UPDATE
+ON_CHECK = None  # POST /api/update/check calls this: returns ("update" | "current" | "failed", what to show)
+APP_VERSION = None  # the Windows app's version, shown on the page; None for the command-line companion
 
 
 @dataclasses.dataclass(frozen=True)
@@ -755,7 +759,8 @@ def state(game_dir):
     kind, message = status()
     cfg = load_companion()
     app = {"gameDir": game_dir or "", "log": list(LINES)[::-1],
-           "status": {"kind": kind, "message": message}, "canChooseFolder": ON_FOLDER is not None}
+           "status": {"kind": kind, "message": message}, "canChooseFolder": ON_FOLDER is not None,
+           "appVersion": APP_VERSION, "update": UPDATE}
     if not game_dir:
         return {"found": False, "settings": dict(DEFAULTS), "companion": cfg, "shots": [], "history": [],
                 "setup": setup_steps(None, {}, cfg, {}), **app}
@@ -837,6 +842,16 @@ class Handler(BaseHTTPRequestHandler):
             if ON_SHOW:
                 ON_SHOW()
             return self.send(200 if ON_SHOW else 404, "{}")
+        if self.path == "/api/update":  # the page's Update button
+            if not (ON_UPDATE and UPDATE):
+                return self.send(404, "{}")
+            ON_UPDATE()
+            return self.send(200, "{}")
+        if self.path == "/api/update/check":  # the page's Check for updates button
+            if not ON_CHECK:
+                return self.send(404, "{}")
+            kind, message = ON_CHECK()
+            return self.send(200, json.dumps({"kind": kind, "message": message, "update": UPDATE}))
         if self.path not in ("/api/settings", "/api/companion", "/api/folder", "/api/test", "/api/webhook", "/api/addon"):
             return self.send(404, "{}")
         try:
